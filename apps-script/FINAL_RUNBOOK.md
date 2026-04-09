@@ -28,7 +28,7 @@ No painel publicado, teste com override de endpoint:
 Isso evita esperar merge/deploy do site para testar o backend novo.
 
 Exemplo pronto:
-`https://reinaldobueno-cyber.github.io/projectcsi/?apps_script_url=https://script.google.com/macros/s/AKfycbwC0UygsOMUVp-U6IaBE9Z4WSOG9B13XnWRXk4jeZ3a626qOkOLRoJmrJnjY4q-S5cj/exec`
+`https://reinaldobueno-cyber.github.io/projectcsi/?apps_script_url=https://script.google.com/macros/s/AKfycby3OimL5C68K40B7lt6iMHjIrDUhhXBmeM3FLZMOzHf2evn-q-_2kIDzprls44N_vjJ/exec`
 
 Para forçar backend sem cache no painel:
 `https://reinaldobueno-cyber.github.io/projectcsi/?apps_script_url=SEU_WEBAPP_URL&force_nocache=1`

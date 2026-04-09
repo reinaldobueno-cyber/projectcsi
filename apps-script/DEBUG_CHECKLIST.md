@@ -23,13 +23,13 @@ Opção mais simples (sem inspecionar):
 3. Copie a URL completa entre aspas.
 
 Exemplo atual do projeto:
-`https://script.google.com/macros/s/AKfycbwC0UygsOMUVp-U6IaBE9Z4WSOG9B13XnWRXk4jeZ3a626qOkOLRoJmrJnjY4q-S5cj/exec`
+`https://script.google.com/macros/s/AKfycby3OimL5C68K40B7lt6iMHjIrDUhhXBmeM3FLZMOzHf2evn-q-_2kIDzprls44N_vjJ/exec`
 
 Exemplos prontos para colar no navegador (já com o link real):
-1. `https://script.google.com/macros/s/AKfycbwC0UygsOMUVp-U6IaBE9Z4WSOG9B13XnWRXk4jeZ3a626qOkOLRoJmrJnjY4q-S5cj/exec?mes=ALL&callback=cb`
-2. `https://script.google.com/macros/s/AKfycbwC0UygsOMUVp-U6IaBE9Z4WSOG9B13XnWRXk4jeZ3a626qOkOLRoJmrJnjY4q-S5cj/exec?action=clickup&callback=cb`
-3. `https://script.google.com/macros/s/AKfycbwC0UygsOMUVp-U6IaBE9Z4WSOG9B13XnWRXk4jeZ3a626qOkOLRoJmrJnjY4q-S5cj/exec?action=ping&callback=cb`
-4. `https://script.google.com/macros/s/AKfycbwC0UygsOMUVp-U6IaBE9Z4WSOG9B13XnWRXk4jeZ3a626qOkOLRoJmrJnjY4q-S5cj/exec?action=clickup&nocache=1&debug=1&callback=cb`
+1. `https://script.google.com/macros/s/AKfycby3OimL5C68K40B7lt6iMHjIrDUhhXBmeM3FLZMOzHf2evn-q-_2kIDzprls44N_vjJ/exec?mes=ALL&callback=cb`
+2. `https://script.google.com/macros/s/AKfycby3OimL5C68K40B7lt6iMHjIrDUhhXBmeM3FLZMOzHf2evn-q-_2kIDzprls44N_vjJ/exec?action=clickup&callback=cb`
+3. `https://script.google.com/macros/s/AKfycby3OimL5C68K40B7lt6iMHjIrDUhhXBmeM3FLZMOzHf2evn-q-_2kIDzprls44N_vjJ/exec?action=ping&callback=cb`
+4. `https://script.google.com/macros/s/AKfycby3OimL5C68K40B7lt6iMHjIrDUhhXBmeM3FLZMOzHf2evn-q-_2kIDzprls44N_vjJ/exec?action=clickup&nocache=1&debug=1&callback=cb`
 
 ## B) Configuração atual do Apps Script
 
