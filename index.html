@@ -2005,10 +2005,10 @@ function initAlert(){
 var _cbMap={};
 // URL do Google Apps Script - substitua pela sua URL apos implantar
 var APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyL5fXhIUU9sCVQzg528o4GblfqryafdjvRJVPN77u89cKo8BTl6YOYP6z85w7I6_h-/exec';
-var SHEET_TIMEOUT_MS = 35000;
-var SHEET_MAX_RETRIES = 1;
-var CLICKUP_TIMEOUT_MS = 45000;
-var CLICKUP_MAX_RETRIES = 1;
+var SHEET_TIMEOUT_MS = 60000;
+var SHEET_MAX_RETRIES = 2;
+var CLICKUP_TIMEOUT_MS = 60000;
+var CLICKUP_MAX_RETRIES = 2;
 
 function _limparJsonp(cb) {
   try { delete window[cb]; } catch(e){}
@@ -2048,8 +2048,10 @@ function loadAll() {
       done = true;
       _limparJsonp(cbName);
       if (attempt < SHEET_MAX_RETRIES) {
+        console.warn('[PMO] Timeout planilha tentativa', attempt + 1, 'de', SHEET_MAX_RETRIES + 1);
         tentar(attempt + 1);
       } else {
+        console.error('[PMO] Timeout final planilha apos', SHEET_MAX_RETRIES + 1, 'tentativas');
         _finalizarLoad([], isRefresh, 'timeout');
       }
     }, SHEET_TIMEOUT_MS);
@@ -2062,6 +2064,7 @@ function loadAll() {
       if (resp && resp.projetos && resp.projetos.length > 0) {
         _finalizarLoad(resp.projetos, isRefresh, 'ok');
       } else if (attempt < SHEET_MAX_RETRIES) {
+        console.warn('[PMO] Resposta vazia planilha tentativa', attempt + 1, 'de', SHEET_MAX_RETRIES + 1);
         tentar(attempt + 1);
       } else {
         _finalizarLoad([], isRefresh, 'vazio');
@@ -2077,6 +2080,7 @@ function loadAll() {
       clearTimeout(timer);
       _limparJsonp(cbName);
       if (attempt < SHEET_MAX_RETRIES) {
+        console.warn('[PMO] Erro de rede planilha tentativa', attempt + 1, 'de', SHEET_MAX_RETRIES + 1);
         tentar(attempt + 1);
       } else {
         _finalizarLoad([], isRefresh, 'erro');
@@ -2110,7 +2114,7 @@ function _finalizarLoad(projetos, isRefresh, motivo) {
     if (isRefresh) showToast(projetos.length + ' projetos atualizados \u2714', 'ok');
   } else {
     if (nd) { try { var _t=localStorage.getItem('multsoft_pmo_ts'); nd.textContent=_t?('Cache: '+new Date(parseInt(_t)).toLocaleDateString('pt-BR')+' '+new Date(parseInt(_t)).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})):('Local: '+DATA.projetos.length+' proj.'); } catch(e){ nd.textContent='Local: '+DATA.projetos.length+' proj.'; } }
-    if (motivo === 'timeout') showToast('Planilha demorou \u2014 dados locais exibidos', 'err');
+    if (motivo === 'timeout') showToast('Planilha demorou (\u2265'+Math.round(SHEET_TIMEOUT_MS/1000)+'s x '+(SHEET_MAX_RETRIES+1)+' tentativas) \u2014 dados locais exibidos', 'err');
     else if (motivo === 'erro') showToast('Erro de conex\u00E3o \u2014 dados locais exibidos', 'err');
   }
 
@@ -2425,8 +2429,10 @@ function _ckBuscar() {
       if(done) return; done=true; _limparCkJsonp(cbName);
       if (attempt < CLICKUP_MAX_RETRIES) {
         showToast('ClickUp lento, tentando novamente... ('+(attempt+2)+'/'+(CLICKUP_MAX_RETRIES+1)+')','err');
+        console.warn('[PMO] Timeout ClickUp tentativa', attempt + 1, 'de', CLICKUP_MAX_RETRIES + 1);
         tentarCK(attempt+1);
       } else {
+        console.error('[PMO] Timeout final ClickUp apos', CLICKUP_MAX_RETRIES + 1, 'tentativas');
         showToast('Timeout \u2014 Apps Script demorou mais de '+Math.round(CLICKUP_TIMEOUT_MS/1000)+'s','err');
         _renderCk(filteredProj());
       }
@@ -2435,12 +2441,12 @@ function _ckBuscar() {
     window[cbName]=function(resp){
       if(done) return; done=true; clearTimeout(timer); _limparCkJsonp(cbName);
       if(resp&&resp.erro){
-        if (attempt < CLICKUP_MAX_RETRIES) { tentarCK(attempt+1); return; }
+        if (attempt < CLICKUP_MAX_RETRIES) { console.warn('[PMO] Erro ClickUp tentativa', attempt + 1, 'de', CLICKUP_MAX_RETRIES + 1, resp.erro); tentarCK(attempt+1); return; }
         showToast('Erro: '+resp.erro,'err'); _renderCk(filteredProj()); return;
       }
       var ckList=(resp&&resp.clickup)||[];
       if(!ckList.length){
-        if (attempt < CLICKUP_MAX_RETRIES) { tentarCK(attempt+1); return; }
+        if (attempt < CLICKUP_MAX_RETRIES) { console.warn('[PMO] Resposta vazia ClickUp tentativa', attempt + 1, 'de', CLICKUP_MAX_RETRIES + 1); tentarCK(attempt+1); return; }
         showToast('Nenhum dado retornado','err'); _renderCk(filteredProj()); return;
       }
       var n=0;
@@ -2470,7 +2476,7 @@ function _ckBuscar() {
     s.src=APPS_SCRIPT_URL+'?action=clickup&callback='+cbName+'&_ts='+Date.now();
     s.onerror=function(){
       if(done) return; done=true; clearTimeout(timer); _limparCkJsonp(cbName);
-      if (attempt < CLICKUP_MAX_RETRIES) { tentarCK(attempt+1); return; }
+      if (attempt < CLICKUP_MAX_RETRIES) { console.warn('[PMO] Erro de rede ClickUp tentativa', attempt + 1, 'de', CLICKUP_MAX_RETRIES + 1); tentarCK(attempt+1); return; }
       showToast('Erro ao chamar Apps Script','err'); _renderCk(filteredProj());
     };
     document.head.appendChild(s);
