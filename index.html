@@ -2131,6 +2131,49 @@ function _normCK(s) {
     .replace(/[\u00D9\u00DA\u00DB\u00DC]/g,'U').replace(/\u00C7/g,'C')
     .replace(/[^A-Z0-9 ]/g,' ').replace(/\s+/g,' ').trim();
 }
+function _compactCK(s){
+  return _normCK(s).replace(/\s+/g,'');
+}
+function _ckClientName(item){
+  return item && (item.cliente || item.cliente_nome || item.clienteNome || item.nome || item.projeto || item.project || '');
+}
+function _ckFolderUrl(item){
+  return item && (item.folderUrl || item.folder_url || item.url || item.link || null);
+}
+function _ckAliases(nome){
+  var base = _normCK(nome);
+  if (!base) return [];
+  var out = [base, _compactCK(base)];
+  var semCnpj = base.replace(/\bCNPJ\b.*$/,'').trim();
+  if (semCnpj && semCnpj !== base) out.push(semCnpj, _compactCK(semCnpj));
+  var split = semCnpj.split(/\s*[-|]\s*|\s+\(\s*/).map(function(x){return x.trim();}).filter(Boolean);
+  split.forEach(function(s){
+    if (s.length >= 6) out.push(s, _compactCK(s));
+  });
+  return out.filter(function(v, i, arr){ return v && arr.indexOf(v) === i; });
+}
+function _ckSalvarAliases(nome, payload){
+  _ckAliases(nome).forEach(function(k){
+    var atual = _ckCache[k];
+    if (!atual || (!atual.folderUrl && payload.folderUrl)) _ckCache[k] = payload;
+  });
+}
+function _ckBuscarProjeto(nome){
+  var aliases = _ckAliases(nome);
+  for (var i=0;i<aliases.length;i++) {
+    var achou = _ckCache[aliases[i]];
+    if (achou) return achou;
+  }
+  var compact = _compactCK(nome);
+  if (!compact) return null;
+  var keys = Object.keys(_ckCache);
+  for (var k=0;k<keys.length;k++) {
+    var key = keys[k];
+    if (key.length < 6) continue;
+    if (key.indexOf(compact) >= 0 || compact.indexOf(key) >= 0) return _ckCache[key];
+  }
+  return null;
+}
 
 function initCk() {
   var el = document.getElementById('ck-content');
@@ -2146,7 +2189,7 @@ function _renderCk(proj) {
 
   // Monta lista combinando riscos da planilha + dados reais do CK
   var lista = proj.map(function(p) {
-    var ck    = _ckCache[_normCK(p.cliente)] || null;
+    var ck    = _ckBuscarProjeto(p.cliente);
     var score = 0;
     var riscos = [], acoes = [];
 
@@ -2372,8 +2415,10 @@ function _ckBuscar() {
     if(!ckList.length){ showToast('Nenhum dado retornado','err'); _renderCk(filteredProj()); return; }
     var n=0;
     ckList.forEach(function(item){
-      if(!item||!item.cliente) return;
-      _ckCache[_normCK(item.cliente)]={
+      if(!item) return;
+      var clienteNome = _ckClientName(item);
+      if(!clienteNome) return;
+      var payload = {
         lastUpdate:    item.lastUpdate    || Date.now(),
         diasSemUpdate: typeof item.diasSemUpdate==='number' ? item.diasSemUpdate : 99,
         consultor:     item.consultor     || null,
@@ -2381,8 +2426,9 @@ function _ckBuscar() {
           var st=String(f.status||'').toLowerCase();
           return {nome:f.nome||f.name||'', status:f.status||'', done:!!(f.done||/done|closed|conclu/i.test(st)), assignee:f.assignee||null};
         }),
-        folderUrl:     item.folderUrl     || null
+        folderUrl:     _ckFolderUrl(item)
       };
+      _ckSalvarAliases(clienteNome, payload);
       n++;
     });
     showToast(n+' projetos com dados reais do ClickUp!','ok');
