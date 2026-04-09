@@ -40,6 +40,11 @@ function _cfg(name, fallback) {
   return (qv === null || qv === undefined || qv === '') ? fallback : qv;
 }
 
+function _isCronogramaNome(nome) {
+  var n = String(nome || '').toLowerCase();
+  return n.indexOf('cronograma') >= 0 || n.indexOf('implant') >= 0 || n.indexOf('onboard') >= 0;
+}
+
 function doGet(e) {
   var callback = (e && e.parameter && e.parameter.callback) || '';
   var action   = (e && e.parameter && e.parameter.action)   || 'sheets';
@@ -70,9 +75,15 @@ function _buscarSheets(e) {
   var cached = cache.get(cacheKey);
   if (cached) return JSON.parse(cached);
 
-  var abas  = mes === 'ALL' ? DEFAULT_MESES : [mes];
+  var abas = [];
   var result = [];
   var ss = SpreadsheetApp.openById(SHEET_ID);
+  if (mes === 'ALL') {
+    // Usa todas as abas com dados (evita depender de nomes fixos JAN..DEZ)
+    abas = ss.getSheets().map(function(s){ return s.getName(); });
+  } else {
+    abas = [mes];
+  }
 
   abas.forEach(function(m) {
     var sheet = ss.getSheetByName(m);
@@ -145,66 +156,54 @@ function _buscarClickUp() {
   if (cached) return JSON.parse(cached);
 
   var spaces = JSON.parse(spacesJson || '[]');
-  if (!spaces.length) throw new Error('CK_SPACES_JSON vazio.');
   var hdrs = { 'Authorization': token };
   var projetos = [];
   var started = Date.now();
 
-  // 1) Busca pastas de todos os spaces
-  var folders = [];
+  // Auto-descoberta de spaces se CK_SPACES_JSON não estiver preenchido corretamente
+  if (!spaces.length) {
+    try {
+      var sresp = UrlFetchApp.fetch(
+        'https://api.clickup.com/api/v2/team/' + workspaceId + '/space?archived=false',
+        { headers: hdrs, muteHttpExceptions: true }
+      );
+      spaces = (JSON.parse(sresp.getContentText() || '{}').spaces || []).map(function(s){ return s.id; });
+    } catch (e0) {}
+  }
+  if (!spaces.length) return { clickup: [], meta: { total: 0, generatedAt: new Date().toISOString(), erro: 'Sem spaces válidos (CK_SPACES_JSON)' } };
+
+  // 1) Busca listas de todos os spaces (inclui listas sem pasta)
+  var allLists = [];
   spaces.forEach(function(spaceId) {
     if ((Date.now() - started) > CLICKUP_MAX_MS) return;
     try {
-      var fresp = UrlFetchApp.fetch(
-        'https://api.clickup.com/api/v2/space/' + spaceId + '/folder?archived=false',
+      var lresp = UrlFetchApp.fetch(
+        'https://api.clickup.com/api/v2/space/' + spaceId + '/list?archived=false',
         { headers: hdrs, muteHttpExceptions: true }
       );
-      var part = JSON.parse(fresp.getContentText() || '{}').folders || [];
-      folders = folders.concat(part);
+      var listas = JSON.parse(lresp.getContentText() || '{}').lists || [];
+      listas.forEach(function(li){ li._spaceId = spaceId; });
+      allLists = allLists.concat(listas);
     } catch (e1) {}
   });
-  if (folders.length > CLICKUP_MAX_FOLDERS) folders = folders.slice(0, CLICKUP_MAX_FOLDERS);
 
-  // 2) Busca listas por pasta em paralelo
-  var listRequests = folders.map(function(folder) {
-    return {
-      url: 'https://api.clickup.com/api/v2/folder/' + folder.id + '/list?archived=false',
-      method: 'get',
-      headers: hdrs,
-      muteHttpExceptions: true
-    };
-  });
+  if (allLists.length > CLICKUP_MAX_FOLDERS * 2) allLists = allLists.slice(0, CLICKUP_MAX_FOLDERS * 2);
 
-  var listResponses = [];
-  for (var li = 0; li < listRequests.length; li += 20) {
-    if ((Date.now() - started) > CLICKUP_MAX_MS) break;
-    listResponses = listResponses.concat(UrlFetchApp.fetchAll(listRequests.slice(li, li + 20)));
-  }
-
-  // 3) Descobre listas de cronograma
-  var cronos = [];
-  for (var lr = 0; lr < listResponses.length; lr++) {
-    if ((Date.now() - started) > CLICKUP_MAX_MS) break;
-    try {
-      var listas = JSON.parse(listResponses[lr].getContentText() || '{}').lists || [];
-      var cron = null;
-      for (var c = 0; c < listas.length; c++) {
-        var nm = String(listas[c].name || '').toLowerCase();
-        if (nm.indexOf('cronograma') >= 0) { cron = listas[c]; break; }
-      }
-      if (cron) cronos.push({ folder: folders[lr], list: cron });
-    } catch (e2) {}
+  // 2) Filtra listas candidatas (cronograma/implantação/onboarding)
+  var cronos = allLists.filter(function(li){ return _isCronogramaNome(li.name); });
+  if (!cronos.length) {
+    // fallback: usa todas as listas se não encontrou padrão de nome
+    cronos = allLists;
   }
 
   // 4) Busca tasks das listas cronograma em paralelo (page 0 por estabilidade)
   var taskReqMap = [];
-  cronos.forEach(function(cr) {
+  cronos.forEach(function(li) {
     for (var page = 0; page < CLICKUP_TASK_PAGE_LIMIT; page++) {
       taskReqMap.push({
-        folder: cr.folder,
-        list: cr.list,
+        list: li,
         req: {
-          url: 'https://api.clickup.com/api/v2/list/' + cr.list.id +
+          url: 'https://api.clickup.com/api/v2/list/' + li.id +
             '/task?archived=false&include_closed=true&subtasks=false&order_by=updated&reverse=true&page=' + page,
           method: 'get',
           headers: hdrs,
@@ -226,7 +225,7 @@ function _buscarClickUp() {
   taskPairs.forEach(function(pair) {
     try {
       var id = String(pair.meta.list.id);
-      if (!byList[id]) byList[id] = { folder: pair.meta.folder, list: pair.meta.list, tasks: [] };
+      if (!byList[id]) byList[id] = { list: pair.meta.list, tasks: [] };
       var pageTasks = JSON.parse(pair.res.getContentText() || '{}').tasks || [];
       byList[id].tasks = byList[id].tasks.concat(pageTasks);
     } catch (e3) {}
@@ -263,9 +262,10 @@ function _buscarClickUp() {
     });
 
     var totalFases = fases.length;
+    var clienteNome = (pack.list && pack.list.folder && pack.list.folder.name) || (pack.list && pack.list.name) || '';
     projetos.push({
-      cliente: (pack.folder && pack.folder.name) || '',
-      folderId: (pack.folder && pack.folder.id) || '',
+      cliente: clienteNome,
+      folderId: (pack.list && pack.list.folder && pack.list.folder.id) || '',
       listId: pack.list.id,
       folderUrl: 'https://app.clickup.com/' + workspaceId + '/v/li/' + pack.list.id,
       lastUpdate: lastUpdate,
