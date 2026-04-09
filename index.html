@@ -2005,9 +2005,12 @@ function initAlert(){
 var _cbMap={};
 // URL do Google Apps Script - substitua pela sua URL apos implantar
 var APPS_SCRIPT_URL_DEFAULT = 'https://script.google.com/macros/s/AKfycbwC0UygsOMUVp-U6IaBE9Z4WSOG9B13XnWRXk4jeZ3a626qOkOLRoJmrJnjY4q-S5cj/exec';
+var APPS_FORCE_NOCACHE = false;
 var APPS_SCRIPT_URL = (function(){
   try {
-    var p = new URLSearchParams(window.location.search).get('apps_script_url');
+    var qs = new URLSearchParams(window.location.search);
+    var p = qs.get('apps_script_url');
+    APPS_FORCE_NOCACHE = qs.get('force_nocache') === '1' || !!p;
     if (p && p.indexOf('script.google.com/macros/s/') >= 0) return p;
   } catch(e) {}
   return APPS_SCRIPT_URL_DEFAULT;
@@ -2080,7 +2083,7 @@ function loadAll() {
 
     var s = document.createElement('script');
     s.id  = '_jsonp_' + cbName;
-    s.src = APPS_SCRIPT_URL + '?mes=ALL&callback=' + cbName + '&_ts=' + Date.now();
+    s.src = APPS_SCRIPT_URL + '?mes=ALL&callback=' + cbName + '&_ts=' + Date.now() + (APPS_FORCE_NOCACHE ? '&nocache=1&debug=1' : '');
     s.onerror = function() {
       if (done) return;
       done = true;
@@ -2480,7 +2483,7 @@ function _ckBuscar() {
 
     var s=document.createElement('script');
     s.id='_ckJsonp_'+cbName;
-    s.src=APPS_SCRIPT_URL+'?action=clickup&callback='+cbName+'&_ts='+Date.now();
+    s.src=APPS_SCRIPT_URL+'?action=clickup&callback='+cbName+'&_ts='+Date.now()+(APPS_FORCE_NOCACHE?'&nocache=1&debug=1':'');
     s.onerror=function(){
       if(done) return; done=true; clearTimeout(timer); _limparCkJsonp(cbName);
       if (attempt < CLICKUP_MAX_RETRIES) { console.warn('[PMO] Erro de rede ClickUp tentativa', attempt + 1, 'de', CLICKUP_MAX_RETRIES + 1); tentarCK(attempt+1); return; }

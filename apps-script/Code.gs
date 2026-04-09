@@ -58,6 +58,7 @@ function doGet(e) {
 
   try {
     if (action === 'ping') result = _ping();
+    else if (action === 'schema') result = _schemaSheets();
     else result = action === 'clickup' ? _buscarClickUp({nocache:nocache, debug:debug}) : _buscarSheets(e, {nocache:nocache, debug:debug});
   } catch (err) {
     result = {
@@ -87,6 +88,23 @@ function _ping() {
   };
 }
 
+function _schemaSheets() {
+  var SHEET_ID = _cfg('SHEET_ID', '');
+  if (!SHEET_ID) throw new Error('SHEET_ID não configurado.');
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var out = ss.getSheets().map(function(s){
+    var vals = s.getDataRange().getValues();
+    var sample = vals.length ? vals[0] : [];
+    return {
+      aba: s.getName(),
+      linhas: vals.length,
+      colunas: sample.length,
+      headerRow0: sample.map(function(x){ return String(x || '').trim(); })
+    };
+  });
+  return { ok:true, version: APP_VERSION, sheets: out };
+}
+
 function _buscarSheets(e, opts) {
   opts = opts || {};
   var SHEET_ID = _cfg('SHEET_ID', '');
@@ -113,7 +131,14 @@ function _buscarSheets(e, opts) {
     if (!sheet) return;
     var data = sheet.getDataRange().getValues();
     if (data.length < 2) return;
-    var hdrs = data[0].map(function(h){ return String(h).trim().toUpperCase(); });
+
+    // Descobre automaticamente linha de cabeçalho (evita planilhas com título na 1ª linha)
+    var hdrRowIndex = 0;
+    for (var hr = 0; hr < Math.min(5, data.length); hr++) {
+      var maybe = data[hr].map(function(h){ return String(h || '').trim().toUpperCase(); }).join(' | ');
+      if (maybe.indexOf('CLIENTE') >= 0 || maybe.indexOf('CONSULTOR') >= 0 || maybe.indexOf('STATUS') >= 0) { hdrRowIndex = hr; break; }
+    }
+    var hdrs = data[hdrRowIndex].map(function(h){ return String(h).trim().toUpperCase(); });
 
     function col(n) { return hdrs.indexOf(String(n).toUpperCase()); }
     function colAny(names) {
@@ -144,7 +169,7 @@ function _buscarSheets(e, opts) {
       return String(val).trim();
     }
 
-    for (var r=1; r<data.length; r++) {
+    for (var r=hdrRowIndex+1; r<data.length; r++) {
       var row=data[r];
       var cliente=vAny(row,['CLIENTE','CLIENTE / FAZENDA','NOME CLIENTE']);
       if (!cliente) continue;

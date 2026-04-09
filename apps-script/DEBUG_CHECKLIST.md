@@ -10,6 +10,7 @@ Abra no navegador (logado na conta do Apps Script) e copie o retorno bruto:
 2. `SEU_WEBAPP_URL?action=clickup&callback=cb`
 3. `SEU_WEBAPP_URL?action=ping&callback=cb`
 4. `SEU_WEBAPP_URL?action=clickup&nocache=1&debug=1&callback=cb`
+5. `SEU_WEBAPP_URL?action=schema&callback=cb`
 
 > Envie print + texto retornado.
 > **Atenção:** `SEU_WEBAPP_URL` é um placeholder. Você precisa trocar pelo link real.

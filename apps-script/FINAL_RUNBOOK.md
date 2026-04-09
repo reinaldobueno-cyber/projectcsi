@@ -27,6 +27,17 @@ No painel publicado, teste com override de endpoint:
 
 Isso evita esperar merge/deploy do site para testar o backend novo.
 
+Exemplo pronto:
+`https://reinaldobueno-cyber.github.io/projectcsi/?apps_script_url=https://script.google.com/macros/s/AKfycbwC0UygsOMUVp-U6IaBE9Z4WSOG9B13XnWRXk4jeZ3a626qOkOLRoJmrJnjY4q-S5cj/exec`
+
+Para forçar backend sem cache no painel:
+`https://reinaldobueno-cyber.github.io/projectcsi/?apps_script_url=SEU_WEBAPP_URL&force_nocache=1`
+
+### Publico primeiro a ramificação?
+
+- Para testar o backend **não precisa** publicar a ramificação do site primeiro (use `apps_script_url`).
+- Para deixar definitivo para todos os usuários, aí sim publique/merge a ramificação com o `APPS_SCRIPT_URL` correto.
+
 ## 3) Forçar atualização sem cache
 
 Abrir no navegador:
