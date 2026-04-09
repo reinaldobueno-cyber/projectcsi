@@ -60,7 +60,11 @@ function doGet(e) {
     if (action === 'ping') result = _ping();
     else result = action === 'clickup' ? _buscarClickUp({nocache:nocache, debug:debug}) : _buscarSheets(e, {nocache:nocache, debug:debug});
   } catch (err) {
-    result = { erro: String(err && err.message ? err.message : err) };
+    result = {
+      erro: String(err && err.message ? err.message : err),
+      version: APP_VERSION,
+      action: action
+    };
   }
 
   var json = JSON.stringify(result);
