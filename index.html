@@ -2004,7 +2004,18 @@ function initAlert(){
 // ---- Google Sheets JSONP loader ----
 var _cbMap={};
 // URL do Google Apps Script - substitua pela sua URL apos implantar
-var APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyL5fXhIUU9sCVQzg528o4GblfqryafdjvRJVPN77u89cKo8BTl6YOYP6z85w7I6_h-/exec';
+var APPS_SCRIPT_URL_DEFAULT = 'https://script.google.com/macros/s/AKfycbwC0UygsOMUVp-U6IaBE9Z4WSOG9B13XnWRXk4jeZ3a626qOkOLRoJmrJnjY4q-S5cj/exec';
+var APPS_SCRIPT_URL = (function(){
+  try {
+    var p = new URLSearchParams(window.location.search).get('apps_script_url');
+    if (p && p.indexOf('script.google.com/macros/s/') >= 0) return p;
+  } catch(e) {}
+  return APPS_SCRIPT_URL_DEFAULT;
+})();
+var SHEET_TIMEOUT_MS = 60000;
+var SHEET_MAX_RETRIES = 2;
+var CLICKUP_TIMEOUT_MS = 60000;
+var CLICKUP_MAX_RETRIES = 2;
 
 function _limparJsonp(cb) {
   try { delete window[cb]; } catch(e){}
@@ -2034,40 +2045,58 @@ function loadAll() {
     return;
   }
 
-  var done  = false;
-  var cbName = '_cb' + Date.now();
+  function tentar(attempt) {
+    var done  = false;
+    var cbName = '_cb' + Date.now() + '_' + attempt;
+    if (lt && attempt > 0) lt.textContent = 'Reprocessando planilha... tentativa ' + (attempt + 1) + '/' + (SHEET_MAX_RETRIES + 1);
 
-  // Timeout: 12s
-  var timer = setTimeout(function() {
-    if (done) return;
-    done = true;
-    _limparJsonp(cbName);
-    _finalizarLoad([], isRefresh, 'timeout');
-  }, 12000);
+    var timer = setTimeout(function() {
+      if (done) return;
+      done = true;
+      _limparJsonp(cbName);
+      if (attempt < SHEET_MAX_RETRIES) {
+        console.warn('[PMO] Timeout planilha tentativa', attempt + 1, 'de', SHEET_MAX_RETRIES + 1);
+        tentar(attempt + 1);
+      } else {
+        console.error('[PMO] Timeout final planilha apos', SHEET_MAX_RETRIES + 1, 'tentativas');
+        _finalizarLoad([], isRefresh, 'timeout');
+      }
+    }, SHEET_TIMEOUT_MS);
 
-  window[cbName] = function(resp) {
-    if (done) return;
-    done = true;
-    clearTimeout(timer);
-    _limparJsonp(cbName);
-    if (resp && resp.projetos && resp.projetos.length > 0) {
-      _finalizarLoad(resp.projetos, isRefresh, 'ok');
-    } else {
-      _finalizarLoad([], isRefresh, 'vazio');
-    }
-  };
+    window[cbName] = function(resp) {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      _limparJsonp(cbName);
+      if (resp && resp.projetos && resp.projetos.length > 0) {
+        _finalizarLoad(resp.projetos, isRefresh, 'ok');
+      } else if (attempt < SHEET_MAX_RETRIES) {
+        console.warn('[PMO] Resposta vazia planilha tentativa', attempt + 1, 'de', SHEET_MAX_RETRIES + 1);
+        tentar(attempt + 1);
+      } else {
+        _finalizarLoad([], isRefresh, 'vazio');
+      }
+    };
 
-  var s = document.createElement('script');
-  s.id  = '_jsonp_' + cbName;
-  s.src = APPS_SCRIPT_URL + '?mes=ALL&callback=' + cbName;
-  s.onerror = function() {
-    if (done) return;
-    done = true;
-    clearTimeout(timer);
-    _limparJsonp(cbName);
-    _finalizarLoad([], isRefresh, 'erro');
-  };
-  document.head.appendChild(s);
+    var s = document.createElement('script');
+    s.id  = '_jsonp_' + cbName;
+    s.src = APPS_SCRIPT_URL + '?mes=ALL&callback=' + cbName + '&_ts=' + Date.now();
+    s.onerror = function() {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      _limparJsonp(cbName);
+      if (attempt < SHEET_MAX_RETRIES) {
+        console.warn('[PMO] Erro de rede planilha tentativa', attempt + 1, 'de', SHEET_MAX_RETRIES + 1);
+        tentar(attempt + 1);
+      } else {
+        _finalizarLoad([], isRefresh, 'erro');
+      }
+    };
+    document.head.appendChild(s);
+  }
+
+  tentar(0);
 }
 
 function _finalizarLoad(projetos, isRefresh, motivo) {
@@ -2092,7 +2121,7 @@ function _finalizarLoad(projetos, isRefresh, motivo) {
     if (isRefresh) showToast(projetos.length + ' projetos atualizados \u2714', 'ok');
   } else {
     if (nd) { try { var _t=localStorage.getItem('multsoft_pmo_ts'); nd.textContent=_t?('Cache: '+new Date(parseInt(_t)).toLocaleDateString('pt-BR')+' '+new Date(parseInt(_t)).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})):('Local: '+DATA.projetos.length+' proj.'); } catch(e){ nd.textContent='Local: '+DATA.projetos.length+' proj.'; } }
-    if (motivo === 'timeout') showToast('Planilha demorou \u2014 dados locais exibidos', 'err');
+    if (motivo === 'timeout') showToast('Planilha demorou (\u2265'+Math.round(SHEET_TIMEOUT_MS/1000)+'s x '+(SHEET_MAX_RETRIES+1)+' tentativas) \u2014 dados locais exibidos', 'err');
     else if (motivo === 'erro') showToast('Erro de conex\u00E3o \u2014 dados locais exibidos', 'err');
   }
 
@@ -2131,6 +2160,49 @@ function _normCK(s) {
     .replace(/[\u00D9\u00DA\u00DB\u00DC]/g,'U').replace(/\u00C7/g,'C')
     .replace(/[^A-Z0-9 ]/g,' ').replace(/\s+/g,' ').trim();
 }
+function _compactCK(s){
+  return _normCK(s).replace(/\s+/g,'');
+}
+function _ckClientName(item){
+  return item && (item.cliente || item.cliente_nome || item.clienteNome || item.nome || item.projeto || item.project || '');
+}
+function _ckFolderUrl(item){
+  return item && (item.folderUrl || item.folder_url || item.url || item.link || null);
+}
+function _ckAliases(nome){
+  var base = _normCK(nome);
+  if (!base) return [];
+  var out = [base, _compactCK(base)];
+  var semCnpj = base.replace(/\bCNPJ\b.*$/,'').trim();
+  if (semCnpj && semCnpj !== base) out.push(semCnpj, _compactCK(semCnpj));
+  var split = semCnpj.split(/\s*[-|]\s*|\s+\(\s*/).map(function(x){return x.trim();}).filter(Boolean);
+  split.forEach(function(s){
+    if (s.length >= 6) out.push(s, _compactCK(s));
+  });
+  return out.filter(function(v, i, arr){ return v && arr.indexOf(v) === i; });
+}
+function _ckSalvarAliases(nome, payload){
+  _ckAliases(nome).forEach(function(k){
+    var atual = _ckCache[k];
+    if (!atual || (!atual.folderUrl && payload.folderUrl)) _ckCache[k] = payload;
+  });
+}
+function _ckBuscarProjeto(nome){
+  var aliases = _ckAliases(nome);
+  for (var i=0;i<aliases.length;i++) {
+    var achou = _ckCache[aliases[i]];
+    if (achou) return achou;
+  }
+  var compact = _compactCK(nome);
+  if (!compact) return null;
+  var keys = Object.keys(_ckCache);
+  for (var k=0;k<keys.length;k++) {
+    var key = keys[k];
+    if (key.length < 6) continue;
+    if (key.indexOf(compact) >= 0 || compact.indexOf(key) >= 0) return _ckCache[key];
+  }
+  return null;
+}
 
 function initCk() {
   var el = document.getElementById('ck-content');
@@ -2146,7 +2218,7 @@ function _renderCk(proj) {
 
   // Monta lista combinando riscos da planilha + dados reais do CK
   var lista = proj.map(function(p) {
-    var ck    = _ckCache[_normCK(p.cliente)] || null;
+    var ck    = _ckBuscarProjeto(p.cliente);
     var score = 0;
     var riscos = [], acoes = [];
 
@@ -2358,45 +2430,66 @@ function _ckBuscar() {
     _renderCk(filteredProj()); return;
   }
 
-  var done=false, cbName='_ckCb'+Date.now();
-  var timer=setTimeout(function(){
-    if(done) return; done=true; _limparCkJsonp(cbName);
-    showToast('Timeout \u2014 Apps Script demorou mais de 30s','err');
-    _renderCk(filteredProj());
-  },30000);
+  function tentarCK(attempt){
+    var done=false, cbName='_ckCb'+Date.now()+'_'+attempt;
+    var timer=setTimeout(function(){
+      if(done) return; done=true; _limparCkJsonp(cbName);
+      if (attempt < CLICKUP_MAX_RETRIES) {
+        showToast('ClickUp lento, tentando novamente... ('+(attempt+2)+'/'+(CLICKUP_MAX_RETRIES+1)+')','err');
+        console.warn('[PMO] Timeout ClickUp tentativa', attempt + 1, 'de', CLICKUP_MAX_RETRIES + 1);
+        tentarCK(attempt+1);
+      } else {
+        console.error('[PMO] Timeout final ClickUp apos', CLICKUP_MAX_RETRIES + 1, 'tentativas');
+        showToast('Timeout \u2014 Apps Script demorou mais de '+Math.round(CLICKUP_TIMEOUT_MS/1000)+'s','err');
+        _renderCk(filteredProj());
+      }
+    },CLICKUP_TIMEOUT_MS);
 
-  window[cbName]=function(resp){
-    if(done) return; done=true; clearTimeout(timer); _limparCkJsonp(cbName);
-    if(resp&&resp.erro){ showToast('Erro: '+resp.erro,'err'); _renderCk(filteredProj()); return; }
-    var ckList=(resp&&resp.clickup)||[];
-    if(!ckList.length){ showToast('Nenhum dado retornado','err'); _renderCk(filteredProj()); return; }
-    var n=0;
-    ckList.forEach(function(item){
-      if(!item||!item.cliente) return;
-      _ckCache[_normCK(item.cliente)]={
-        lastUpdate:    item.lastUpdate    || Date.now(),
-        diasSemUpdate: typeof item.diasSemUpdate==='number' ? item.diasSemUpdate : 99,
-        consultor:     item.consultor     || null,
-        fases:        (item.fases||[]).map(function(f){
-          var st=String(f.status||'').toLowerCase();
-          return {nome:f.nome||f.name||'', status:f.status||'', done:!!(f.done||/done|closed|conclu/i.test(st)), assignee:f.assignee||null};
-        }),
-        folderUrl:     item.folderUrl     || null
-      };
-      n++;
-    });
-    showToast(n+' projetos com dados reais do ClickUp!','ok');
-    _renderCk(filteredProj());
-  };
+    window[cbName]=function(resp){
+      if(done) return; done=true; clearTimeout(timer); _limparCkJsonp(cbName);
+      if(resp&&resp.erro){
+        if (attempt < CLICKUP_MAX_RETRIES) { console.warn('[PMO] Erro ClickUp tentativa', attempt + 1, 'de', CLICKUP_MAX_RETRIES + 1, resp.erro); tentarCK(attempt+1); return; }
+        showToast('Erro: '+resp.erro,'err'); _renderCk(filteredProj()); return;
+      }
+      var ckList=(resp&&resp.clickup)||[];
+      if(!ckList.length){
+        if (attempt < CLICKUP_MAX_RETRIES) { console.warn('[PMO] Resposta vazia ClickUp tentativa', attempt + 1, 'de', CLICKUP_MAX_RETRIES + 1); tentarCK(attempt+1); return; }
+        showToast('Nenhum dado retornado','err'); _renderCk(filteredProj()); return;
+      }
+      var n=0;
+      ckList.forEach(function(item){
+        if(!item) return;
+        var clienteNome = _ckClientName(item);
+        if(!clienteNome) return;
+        var payload = {
+          lastUpdate:    item.lastUpdate    || Date.now(),
+          diasSemUpdate: typeof item.diasSemUpdate==='number' ? item.diasSemUpdate : 99,
+          consultor:     item.consultor     || null,
+          fases:        (item.fases||[]).map(function(f){
+            var st=String(f.status||'').toLowerCase();
+            return {nome:f.nome||f.name||'', status:f.status||'', done:!!(f.done||/done|closed|conclu/i.test(st)), assignee:f.assignee||null};
+          }),
+          folderUrl:     _ckFolderUrl(item)
+        };
+        _ckSalvarAliases(clienteNome, payload);
+        n++;
+      });
+      showToast(n+' projetos com dados reais do ClickUp!','ok');
+      _renderCk(filteredProj());
+    };
 
-  var s=document.createElement('script');
-  s.id='_ckJsonp_'+cbName;
-  s.src=APPS_SCRIPT_URL+'?action=clickup&callback='+cbName;
-  s.onerror=function(){
-    if(done) return; done=true; clearTimeout(timer); _limparCkJsonp(cbName);
-    showToast('Erro ao chamar Apps Script','err'); _renderCk(filteredProj());
-  };
-  document.head.appendChild(s);
+    var s=document.createElement('script');
+    s.id='_ckJsonp_'+cbName;
+    s.src=APPS_SCRIPT_URL+'?action=clickup&callback='+cbName+'&_ts='+Date.now();
+    s.onerror=function(){
+      if(done) return; done=true; clearTimeout(timer); _limparCkJsonp(cbName);
+      if (attempt < CLICKUP_MAX_RETRIES) { console.warn('[PMO] Erro de rede ClickUp tentativa', attempt + 1, 'de', CLICKUP_MAX_RETRIES + 1); tentarCK(attempt+1); return; }
+      showToast('Erro ao chamar Apps Script','err'); _renderCk(filteredProj());
+    };
+    document.head.appendChild(s);
+  }
+
+  tentarCK(0);
 }
 
 function _limparCkJsonp(cb){
