@@ -217,6 +217,7 @@ nav{background:var(--nav);height:58px;display:flex;align-items:center;justify-co
   .ptable-head>*:nth-child(n+3):not(:last-child),.prow>.pcell:nth-child(n+3):not(:last-child){display:none;}
   .prazo-grid,.av-split,.cgrid,.dash-row,.dash-row2{grid-template-columns:1fr;}
   .dash-grid{grid-template-columns:repeat(3,1fr);}
+  .ck-summary-cols{grid-template-columns:1fr;}
   .period-bar,.tabs,.page{padding-left:12px;padding-right:12px;}
 }
 .leaflet-tooltip{max-width:300px!important;white-space:normal!important;word-break:break-word!important;padding:0!important;border:none!important;background:transparent!important;box-shadow:none!important;}
@@ -253,6 +254,19 @@ nav{background:var(--nav);height:58px;display:flex;align-items:center;justify-co
 .ck-stat{background:var(--surf2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;}
 .ck-stat-lbl{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin-bottom:3px;}
 .ck-stat-val{font-size:13px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.ck-summary{background:var(--surf);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:12px;}
+.ck-summary-top{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;}
+.ck-summary-title{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);}
+.ck-summary-cols{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;}
+.ck-col{border:1px solid var(--border);border-radius:8px;padding:8px;background:var(--surf2);}
+.ck-col.has{border-color:rgba(26,82,118,.25);background:#f7fbff;}
+.ck-col.miss{border-color:rgba(184,92,0,.25);background:#fffbf3;}
+.ck-col-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;}
+.ck-col-title{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.7px;}
+.ck-col-count{font-size:12px;font-weight:800;font-family:'JetBrains Mono',monospace;}
+.ck-name-list{font-size:11px;color:var(--text2);line-height:1.5;max-height:120px;overflow:auto;padding-right:4px;}
+.ck-copy{border:1px solid var(--border2);background:#fff;color:var(--text2);border-radius:6px;padding:4px 8px;font-size:10px;font-weight:700;cursor:pointer;}
+.ck-copy:hover{background:#f8faf8;}
 
 </style>
 </head>
@@ -2155,6 +2169,7 @@ var MESES=['JAN','FEV','MAR','ABR','MAI','JUN','JUL','AGO','SET','OUT','NOV','DE
 // ABA CLICKUP
 var _ckFilter = 'all';
 var _ckCache  = {}; // cliente_norm -> dados reais CK
+var _ckWorkspaceId = '';
 
 function _normCK(s) {
   return (s||'').toUpperCase()
@@ -2171,6 +2186,11 @@ function _ckClientName(item){
 }
 function _ckFolderUrl(item){
   return item && (item.folderUrl || item.folder_url || item.url || item.link || null);
+}
+function _ckSearchUrl(nome){
+  var q = encodeURIComponent(nome || '');
+  if (_ckWorkspaceId) return 'https://app.clickup.com/' + _ckWorkspaceId + '/search?query=' + q;
+  return 'https://app.clickup.com/search?query=' + q;
 }
 function _ckAliases(nome){
   var base = _normCK(nome);
@@ -2190,6 +2210,19 @@ function _ckSalvarAliases(nome, payload){
     if (!atual || (!atual.folderUrl && payload.folderUrl)) _ckCache[k] = payload;
   });
 }
+function _ckNomeScore(a, b){
+  var wa = _normCK(a).split(' ').filter(function(x){ return x.length >= 3; });
+  var wb = _normCK(b).split(' ').filter(function(x){ return x.length >= 3; });
+  if (!wa.length || !wb.length) return 0;
+  var used = {}, hit = 0;
+  wa.forEach(function(x){
+    for (var i=0;i<wb.length;i++){
+      if (used[i]) continue;
+      if (wb[i] === x) { used[i] = 1; hit++; return; }
+    }
+  });
+  return (2 * hit) / (wa.length + wb.length);
+}
 function _ckBuscarProjeto(nome){
   var aliases = _ckAliases(nome);
   for (var i=0;i<aliases.length;i++) {
@@ -2204,7 +2237,36 @@ function _ckBuscarProjeto(nome){
     if (key.length < 6) continue;
     if (key.indexOf(compact) >= 0 || compact.indexOf(key) >= 0) return _ckCache[key];
   }
+  var best = null, bestScore = 0;
+  for (var j=0;j<keys.length;j++) {
+    var cand = _ckCache[keys[j]];
+    if (!cand || !cand.nomeRef) continue;
+    var score = _ckNomeScore(nome, cand.nomeRef);
+    if (score > bestScore) { bestScore = score; best = cand; }
+  }
+  if (best && bestScore >= 0.72) return best;
   return null;
+}
+function _ckListaNomes(items){
+  return items.map(function(x){ return x && x.p ? x.p.cliente : ''; }).filter(Boolean);
+}
+function _ckListaResumoHtml(items, vazioTxt){
+  if (!items.length) return '<span style="color:var(--muted)">'+vazioTxt+'</span>';
+  return _ckListaNomes(items).map(function(nome){ return '• '+nome; }).join('<br>');
+}
+function _ckCopiarLista(tipo){
+  var base = filteredProj().map(function(p){
+    return { p:p, temCK: !!_ckBuscarProjeto(p.cliente) };
+  });
+  var itens = tipo === 'has' ? base.filter(function(x){ return x.temCK; }) : base.filter(function(x){ return !x.temCK; });
+  var txt = _ckListaNomes(itens).join('\n');
+  if (!txt) { showToast('Nenhum projeto nesta lista', 'err'); return; }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(txt).then(function(){ showToast('Lista copiada ('+itens.length+')','ok'); })
+      .catch(function(){ showToast('Não foi possível copiar automaticamente','err'); });
+    return;
+  }
+  showToast('Copie manualmente: navegador sem clipboard API', 'err');
 }
 
 function initCk() {
@@ -2272,17 +2334,39 @@ function _renderCk(proj) {
     kpi('Monitorar',nWarn,nWarn>0?'o':'g')+
     kpi('Saud\u00e1vel',nOk,'g')+
     kpi('Dados CK reais',nCK,nCK>0?'b':'d');
+  var semCK=lista.filter(function(x){return !x.temCK;});
+  var comCK=lista.filter(function(x){return x.temCK;});
 
   var mkBtn=function(v,l,n){
     var on=_ckFilter===v;
     return '<button class="fbt'+(on?' on':'')+'" onclick="_ckFilter=\''+v+'\';_renderCk(filteredProj())">'+l+' ('+n+')</button>';
   };
   document.getElementById('ck-filters').innerHTML =
+    '<div class="ck-summary">'+
+      '<div class="ck-summary-top">'+
+        '<span class="ck-summary-title">Cobertura ClickUp (per\u00edodo/filtros atuais)</span>'+
+        '<span style="font-size:11px;color:var(--muted)">Total: <b style="color:var(--text)">'+lista.length+'</b> projetos</span>'+
+      '</div>'+
+      '<div class="ck-summary-cols">'+
+        '<div class="ck-col has">'+
+          '<div class="ck-col-head"><span class="ck-col-title" style="color:var(--blue)">\u2705 Com dados reais</span><span class="ck-col-count">'+comCK.length+'</span></div>'+
+          '<div class="ck-name-list">'+_ckListaResumoHtml(comCK,'Nenhum projeto com dados reais ainda.')+'</div>'+
+          '<div style="margin-top:7px"><button class="ck-copy" onclick="_ckCopiarLista(\'has\')">Copiar lista (com CK)</button></div>'+
+        '</div>'+
+        '<div class="ck-col miss">'+
+          '<div class="ck-col-head"><span class="ck-col-title" style="color:var(--orange)">\u26A0\uFE0F Sem dados reais</span><span class="ck-col-count">'+semCK.length+'</span></div>'+
+          '<div class="ck-name-list">'+_ckListaResumoHtml(semCK,'Nenhum projeto pendente de match.')+'</div>'+
+          '<div style="margin-top:7px"><button class="ck-copy" onclick="_ckCopiarLista(\'miss\')">Copiar lista (sem CK)</button></div>'+
+        '</div>'+
+      '</div>'+
+    '</div>'+
     '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;align-items:center">'+
     mkBtn('all','Todos',lista.length)+
     mkBtn('crit','\uD83D\uDD34 A\u00e7\u00e3o Imediata',nCrit)+
     mkBtn('warn','\uD83D\uDFE1 Monitorar',nWarn)+
     mkBtn('ok','\uD83D\uDFE2 Saud\u00e1vel',nOk)+
+    mkBtn('hasck','\u2705 Com dados CK',nCK)+
+    mkBtn('nock','\u26A0\uFE0F Sem dados CK',lista.length-nCK)+
     '<button onclick="_ckBuscar()" style="margin-left:auto;padding:6px 16px;border-radius:8px;border:1.5px solid var(--nav);background:var(--nav);color:#fff;font-family:inherit;font-size:12px;font-weight:700;cursor:pointer">'+
       (nCK>0?'\u21BA Atualizar ClickUp ('+nCK+' proj.)':'\uD83D\uDD17 Buscar dados do ClickUp')+
     '</button></div>';
@@ -2291,6 +2375,8 @@ function _renderCk(proj) {
   if (_ckFilter==='crit') filtrado=lista.filter(function(x){return x.score>=60;});
   else if (_ckFilter==='warn') filtrado=lista.filter(function(x){return x.score>0&&x.score<60;});
   else if (_ckFilter==='ok') filtrado=lista.filter(function(x){return x.score===0;});
+  else if (_ckFilter==='hasck') filtrado=lista.filter(function(x){return x.temCK;});
+  else if (_ckFilter==='nock') filtrado=lista.filter(function(x){return !x.temCK;});
 
   document.getElementById('ck-content').innerHTML = filtrado.map(function(item,i){
     var p=item.p, cc=ccol(p.consultor||''), si2=si(p.status), bid='ckb'+i;
@@ -2391,7 +2477,7 @@ function _renderCk(proj) {
       '<div class="ck-section" style="display:flex;align-items:center;gap:10px">'+
         (item.folderUrl ?
           '<a href="'+item.folderUrl+'" target="_blank" onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;gap:6px;background:var(--nav);color:#fff;padding:6px 14px;border-radius:7px;font-size:11px;font-weight:700;text-decoration:none">\uD83D\uDD17 Abrir projeto no ClickUp</a>' :
-          '<a href="https://app.clickup.com/9007083069/search?q='+encodeURIComponent(p.cliente)+'" target="_blank" onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;gap:6px;background:var(--surf2);color:var(--nav);border:1.5px solid var(--nav);padding:6px 14px;border-radius:7px;font-size:11px;font-weight:700;text-decoration:none">\uD83D\uDD0D Buscar no ClickUp</a>')+
+          '<a href="'+_ckSearchUrl(p.cliente)+'" target="_blank" onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;gap:6px;background:var(--surf2);color:var(--nav);border:1.5px solid var(--nav);padding:6px 14px;border-radius:7px;font-size:11px;font-weight:700;text-decoration:none">\uD83D\uDD0D Buscar cliente no ClickUp</a>')+
         (item.temCK ?
           '<span style="font-size:10px;color:var(--green);font-weight:600">\u2705 Dados reais do ClickUp carregados</span>' :
           '<span style="font-size:10px;color:var(--muted)">Buscar para dados reais</span>')+
@@ -2472,11 +2558,13 @@ function _ckBuscar() {
             var st=String(f.status||'').toLowerCase();
             return {nome:f.nome||f.name||'', status:f.status||'', done:!!(f.done||/done|closed|conclu/i.test(st)), assignee:f.assignee||null};
           }),
-          folderUrl:     _ckFolderUrl(item)
+          folderUrl:     _ckFolderUrl(item),
+          nomeRef:       clienteNome
         };
         _ckSalvarAliases(clienteNome, payload);
         n++;
       });
+      if (resp && resp.meta) _ckWorkspaceId = String(resp.meta.workspace || resp.meta.team || _ckWorkspaceId || '');
       showToast(n+' projetos com dados reais do ClickUp!','ok');
       _renderCk(filteredProj());
     };
