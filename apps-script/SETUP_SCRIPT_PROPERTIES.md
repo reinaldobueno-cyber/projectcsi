@@ -16,6 +16,7 @@ Crie exatamente estas chaves (name/value):
    - Valor: `1fqvDJ6Xh_POzWGyap9UH2rHulF-2wSe_G80m3rYnBIU`
 2. `CK_TOKEN`
    - Valor: seu token do ClickUp (recomendado: gerar um token novo)
+   - Segurança: nunca compartilhe esse token em PR/chat público; se compartilhar, gere outro.
 3. `WORKSPACE_ID`
    - Valor: `9007083069`
 4. `CK_SPACES_JSON`
@@ -24,6 +25,27 @@ Crie exatamente estas chaves (name/value):
 
 > Importante: em `CK_SPACES_JSON` use colchetes, aspas duplas e vírgulas exatamente como no exemplo.
 > No código, essa propriedade aparece na linha: `_cfg('CK_SPACES_JSON', '[]')`.
+
+### Onde fica isso na tela?
+
+- No editor do Apps Script, menu esquerdo: **Project Settings** (ícone de engrenagem).
+- Dentro dessa página, seção **Script properties**.
+- Clique em **Add script property** para cada item.
+
+### Esses IDs de exemplo servem para qualquer conta?
+
+Não. O `CK_SPACES_JSON` precisa ter os **IDs reais dos seus Spaces** no ClickUp.
+Se os IDs do exemplo não existirem na sua conta, o retorno do ClickUp ficará vazio.
+
+Como obter os IDs rapidamente:
+1. Abra um Space no ClickUp (navegador).
+2. Copie a URL.
+3. Procure o número grande que identifica o Space/lista (normalmente no caminho da URL).
+4. Monte o JSON com seus IDs reais, por exemplo:
+   `["9012...","9013..."]`
+
+> Dica: se não tiver certeza dos IDs, use temporariamente 1 Space e teste `action=clickup`.
+> Se funcionar, adicione os demais IDs aos poucos.
 
 ## 3) Salvar
 
@@ -48,6 +70,7 @@ Se faltar alguma propriedade, o retorno virá com erro tipo:
 
 - Colar `CK_SPACES_JSON` sem aspas duplas.
 - Colar `CK_SPACES_JSON` sem vírgulas entre os IDs (JSON inválido).
+- Usar IDs de exemplo que não pertencem ao seu workspace.
 - Deixar espaço extra no nome da chave (ex: `CK_TOKEN `).
 - Editar e não criar **New version** no deploy.
 
@@ -58,3 +81,14 @@ Ordem recomendada:
 1. Commit no código do painel (se houver mudanças no `index.html`).
 2. Push da branch.
 3. Abrir PR ou atualizar PR existente.
+
+## Modo rápido (para testar agora)
+
+Se estiver com pressa, no `Code.gs` você pode preencher temporariamente:
+- `QUICK_SHEET_ID`
+- `QUICK_CK_TOKEN`
+- `QUICK_WORKSPACE_ID`
+- `QUICK_CK_SPACES_JSON`
+
+Esse modo evita depender de Script Properties no primeiro teste.
+Depois que validar, migre para Script Properties e limpe os valores sensíveis do código.

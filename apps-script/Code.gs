@@ -16,10 +16,28 @@ var CLICKUP_CACHE_TTL_SECONDS = 180; // 3 min
 var SHEETS_CACHE_TTL_SECONDS = 120; // 2 min
 var CLICKUP_MAX_MS = 240000; // evita estourar limite de execução
 var CLICKUP_MAX_FOLDERS = 80; // proteção
+var CLICKUP_TASK_PAGE_LIMIT = 1; // página 0 (mais rápido e estável)
+
+// Modo rápido para teste (opcional):
+// Preencha aqui se não quiser usar Script Properties agora.
+// Depois remova valores sensíveis.
+var QUICK_SHEET_ID = '';
+var QUICK_CK_TOKEN = '';
+var QUICK_WORKSPACE_ID = '';
+var QUICK_CK_SPACES_JSON = '';
 
 function _cfg(name, fallback) {
   var v = PropertiesService.getScriptProperties().getProperty(name);
-  return (v === null || v === undefined || v === '') ? fallback : v;
+  if (v !== null && v !== undefined && v !== '') return v;
+
+  var quick = {
+    SHEET_ID: QUICK_SHEET_ID,
+    CK_TOKEN: QUICK_CK_TOKEN,
+    WORKSPACE_ID: QUICK_WORKSPACE_ID,
+    CK_SPACES_JSON: QUICK_CK_SPACES_JSON
+  };
+  var qv = quick[name];
+  return (qv === null || qv === undefined || qv === '') ? fallback : qv;
 }
 
 function doGet(e) {
@@ -131,89 +149,133 @@ function _buscarClickUp() {
   var hdrs = { 'Authorization': token };
   var projetos = [];
   var started = Date.now();
-  var foldersLidos = 0;
 
+  // 1) Busca pastas de todos os spaces
+  var folders = [];
   spaces.forEach(function(spaceId) {
     if ((Date.now() - started) > CLICKUP_MAX_MS) return;
-    var resp = UrlFetchApp.fetch(
-      'https://api.clickup.com/api/v2/space/' + spaceId + '/folder?archived=false',
-      { headers: hdrs, muteHttpExceptions: true }
-    );
-    var folders = JSON.parse(resp.getContentText() || '{}').folders || [];
-
-    folders.forEach(function(folder) {
-      if ((Date.now() - started) > CLICKUP_MAX_MS) return;
-      if (foldersLidos >= CLICKUP_MAX_FOLDERS) return;
-      foldersLidos++;
-
-      var lresp = UrlFetchApp.fetch(
-        'https://api.clickup.com/api/v2/folder/' + folder.id + '/list?archived=false',
+    try {
+      var fresp = UrlFetchApp.fetch(
+        'https://api.clickup.com/api/v2/space/' + spaceId + '/folder?archived=false',
         { headers: hdrs, muteHttpExceptions: true }
       );
-      var listas = JSON.parse(lresp.getContentText() || '{}').lists || [];
-      var cronograma = null;
-      for (var i=0; i<listas.length; i++) {
-        var nm = String(listas[i].name || '').toLowerCase();
-        if (nm.indexOf('cronograma') >= 0) { cronograma = listas[i]; break; }
+      var part = JSON.parse(fresp.getContentText() || '{}').folders || [];
+      folders = folders.concat(part);
+    } catch (e1) {}
+  });
+  if (folders.length > CLICKUP_MAX_FOLDERS) folders = folders.slice(0, CLICKUP_MAX_FOLDERS);
+
+  // 2) Busca listas por pasta em paralelo
+  var listRequests = folders.map(function(folder) {
+    return {
+      url: 'https://api.clickup.com/api/v2/folder/' + folder.id + '/list?archived=false',
+      method: 'get',
+      headers: hdrs,
+      muteHttpExceptions: true
+    };
+  });
+
+  var listResponses = [];
+  for (var li = 0; li < listRequests.length; li += 20) {
+    if ((Date.now() - started) > CLICKUP_MAX_MS) break;
+    listResponses = listResponses.concat(UrlFetchApp.fetchAll(listRequests.slice(li, li + 20)));
+  }
+
+  // 3) Descobre listas de cronograma
+  var cronos = [];
+  for (var lr = 0; lr < listResponses.length; lr++) {
+    if ((Date.now() - started) > CLICKUP_MAX_MS) break;
+    try {
+      var listas = JSON.parse(listResponses[lr].getContentText() || '{}').lists || [];
+      var cron = null;
+      for (var c = 0; c < listas.length; c++) {
+        var nm = String(listas[c].name || '').toLowerCase();
+        if (nm.indexOf('cronograma') >= 0) { cron = listas[c]; break; }
       }
-      if (!cronograma) return;
+      if (cron) cronos.push({ folder: folders[lr], list: cron });
+    } catch (e2) {}
+  }
 
-      var tasks = [];
-      var page = 0;
-      while (page < 3 && (Date.now() - started) <= CLICKUP_MAX_MS) { // até 300 tarefas aprox
-        var tresp = UrlFetchApp.fetch(
-          'https://api.clickup.com/api/v2/list/' + cronograma.id +
-          '/task?archived=false&include_closed=true&subtasks=false&order_by=updated&reverse=true&page=' + page,
-          { headers: hdrs, muteHttpExceptions: true }
-        );
-        var pageTasks = JSON.parse(tresp.getContentText() || '{}').tasks || [];
-        if (!pageTasks.length) break;
-        tasks = tasks.concat(pageTasks);
-        if (pageTasks.length < 100) break;
-        page++;
-      }
-      if (!tasks.length) return;
-
-      var lastUpdate = 0;
-      var consultorCK = null;
-      var fases = [];
-      var fasesDone = 0;
-
-      tasks.forEach(function(t) {
-        if (t.parent) return;
-        var upd = parseInt(t.date_updated || t.date_created || '0', 10);
-        if (upd > lastUpdate) {
-          lastUpdate = upd;
-          if (t.assignees && t.assignees.length) consultorCK = t.assignees[0].username || null;
+  // 4) Busca tasks das listas cronograma em paralelo (page 0 por estabilidade)
+  var taskReqMap = [];
+  cronos.forEach(function(cr) {
+    for (var page = 0; page < CLICKUP_TASK_PAGE_LIMIT; page++) {
+      taskReqMap.push({
+        folder: cr.folder,
+        list: cr.list,
+        req: {
+          url: 'https://api.clickup.com/api/v2/list/' + cr.list.id +
+            '/task?archived=false&include_closed=true&subtasks=false&order_by=updated&reverse=true&page=' + page,
+          method: 'get',
+          headers: hdrs,
+          muteHttpExceptions: true
         }
-        var st = String((t.status && (t.status.status || t.status)) || '').toLowerCase();
-        var done = st==='concluido'||st==='closed'||st==='done'||st==='complete';
-        if (done) fasesDone++;
-        fases.push({
-          nome: t.name || '',
-          status: (t.status && (t.status.status || t.status)) || '',
-          done: done,
-          assignee: (t.assignees&&t.assignees.length) ? t.assignees[0].username : null,
-          due: t.due_date || null,
-          updated: upd
-        });
       });
+    }
+  });
 
-      var totalFases = fases.length;
-      projetos.push({
-        cliente: folder.name || '',
-        folderId: folder.id,
-        listId: cronograma.id,
-        folderUrl: 'https://app.clickup.com/' + workspaceId + '/v/li/' + cronograma.id,
-        lastUpdate: lastUpdate,
-        diasSemUpdate: lastUpdate > 0 ? Math.floor((Date.now() - lastUpdate) / 86400000) : 999,
-        consultor: consultorCK,
-        fases: fases,
-        progresso: totalFases > 0 ? Math.round(fasesDone / totalFases * 100) : 0,
-        totalFases: totalFases,
-        fasesDone: fasesDone,
-        fasesPend: totalFases - fasesDone
+  var taskPairs = [];
+  for (var tr = 0; tr < taskReqMap.length; tr += 10) {
+    if ((Date.now() - started) > CLICKUP_MAX_MS) break;
+    var chunk = taskReqMap.slice(tr, tr + 10);
+    var respChunk = UrlFetchApp.fetchAll(chunk.map(function(x){ return x.req; }));
+    for (var ri = 0; ri < respChunk.length; ri++) taskPairs.push({ meta: chunk[ri], res: respChunk[ri] });
+  }
+
+  var byList = {};
+  taskPairs.forEach(function(pair) {
+    try {
+      var id = String(pair.meta.list.id);
+      if (!byList[id]) byList[id] = { folder: pair.meta.folder, list: pair.meta.list, tasks: [] };
+      var pageTasks = JSON.parse(pair.res.getContentText() || '{}').tasks || [];
+      byList[id].tasks = byList[id].tasks.concat(pageTasks);
+    } catch (e3) {}
+  });
+
+  Object.keys(byList).forEach(function(listId) {
+    var pack = byList[listId];
+    var tasks = pack.tasks || [];
+    if (!tasks.length) return;
+
+    var lastUpdate = 0;
+    var consultorCK = null;
+    var fases = [];
+    var fasesDone = 0;
+
+    tasks.forEach(function(t) {
+      if (t.parent) return;
+      var upd = parseInt(t.date_updated || t.date_created || '0', 10);
+      if (upd > lastUpdate) {
+        lastUpdate = upd;
+        if (t.assignees && t.assignees.length) consultorCK = t.assignees[0].username || null;
+      }
+      var st = String((t.status && (t.status.status || t.status)) || '').toLowerCase();
+      var done = st==='concluido'||st==='closed'||st==='done'||st==='complete';
+      if (done) fasesDone++;
+      fases.push({
+        nome: t.name || '',
+        status: (t.status && (t.status.status || t.status)) || '',
+        done: done,
+        assignee: (t.assignees && t.assignees.length) ? t.assignees[0].username : null,
+        due: t.due_date || null,
+        updated: upd
       });
+    });
+
+    var totalFases = fases.length;
+    projetos.push({
+      cliente: (pack.folder && pack.folder.name) || '',
+      folderId: (pack.folder && pack.folder.id) || '',
+      listId: pack.list.id,
+      folderUrl: 'https://app.clickup.com/' + workspaceId + '/v/li/' + pack.list.id,
+      lastUpdate: lastUpdate,
+      diasSemUpdate: lastUpdate > 0 ? Math.floor((Date.now() - lastUpdate) / 86400000) : 999,
+      consultor: consultorCK,
+      fases: fases,
+      progresso: totalFases > 0 ? Math.round(fasesDone / totalFases * 100) : 0,
+      totalFases: totalFases,
+      fasesDone: fasesDone,
+      fasesPend: totalFases - fasesDone
     });
   });
 
