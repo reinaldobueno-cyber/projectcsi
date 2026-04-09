@@ -35,17 +35,6 @@ No editor de conflito, use:
 - **Accept Both Changes** no bloco de constantes/timeout e funções de busca ClickUp.
 - Depois revise manualmente para não duplicar função com mesmo nome.
 
-## Quando no GitHub só aparece **Atualizar ramificação**
-
-Se você está vendo apenas o botão **Atualizar ramificação**:
-
-1. Clique em **Atualizar ramificação** primeiro (isso aplica um merge/rebase automático da `main` na sua branch).
-2. Aguarde terminar e recarregue a página da PR.
-3. Se o conflito continuar:
-   - clique em **Resolve conflicts** (se estiver habilitado), ou
-   - faça a resolução pelo terminal (passos acima) e dê `push` na mesma branch da PR.
-4. Se **Resolve conflicts** não aparecer para você, normalmente é permissão do repositório. Nesse caso, peça para um maintainer executar os passos do terminal.
-
 ## Checklist de validação
 
 - Sem marcadores de conflito:
