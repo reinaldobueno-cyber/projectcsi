@@ -17,6 +17,7 @@ var SHEETS_CACHE_TTL_SECONDS = 120; // 2 min
 var CLICKUP_MAX_MS = 240000; // evita estourar limite de execução
 var CLICKUP_MAX_FOLDERS = 80; // proteção
 var CLICKUP_TASK_PAGE_LIMIT = 1; // página 0 (mais rápido e estável)
+var APP_VERSION = '2026-04-09-rapid-debug-v2';
 
 // Modo rápido para teste (opcional):
 // Preencha aqui se não quiser usar Script Properties agora.
@@ -48,10 +49,13 @@ function _isCronogramaNome(nome) {
 function doGet(e) {
   var callback = (e && e.parameter && e.parameter.callback) || '';
   var action   = (e && e.parameter && e.parameter.action)   || 'sheets';
+  var nocache  = !!(e && e.parameter && String(e.parameter.nocache || '') === '1');
+  var debug    = !!(e && e.parameter && String(e.parameter.debug || '') === '1');
   var result;
 
   try {
-    result = action === 'clickup' ? _buscarClickUp() : _buscarSheets(e);
+    if (action === 'ping') result = _ping();
+    else result = action === 'clickup' ? _buscarClickUp({nocache:nocache, debug:debug}) : _buscarSheets(e, {nocache:nocache, debug:debug});
   } catch (err) {
     result = { erro: String(err && err.message ? err.message : err) };
   }
@@ -65,14 +69,26 @@ function doGet(e) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-function _buscarSheets(e) {
+function _ping() {
+  return {
+    ok: true,
+    version: APP_VERSION,
+    hasSheetId: !!_cfg('SHEET_ID', ''),
+    hasToken: !!_cfg('CK_TOKEN', ''),
+    hasWorkspaceId: !!_cfg('WORKSPACE_ID', ''),
+    hasSpacesJson: !!_cfg('CK_SPACES_JSON', '')
+  };
+}
+
+function _buscarSheets(e, opts) {
+  opts = opts || {};
   var SHEET_ID = _cfg('SHEET_ID', '');
   if (!SHEET_ID) throw new Error('SHEET_ID não configurado.');
 
   var mes   = (e && e.parameter && e.parameter.mes) || 'ALL';
   var cacheKey = 'sheets_payload_' + String(mes).toUpperCase();
   var cache = CacheService.getScriptCache();
-  var cached = cache.get(cacheKey);
+  var cached = opts.nocache ? null : cache.get(cacheKey);
   if (cached) return JSON.parse(cached);
 
   var abas = [];
@@ -140,11 +156,13 @@ function _buscarSheets(e) {
     }
   });
   var out = { projetos: result };
+  if (opts.debug) out.meta = { version: APP_VERSION, abasLidas: abas.length, totalProjetos: result.length, mes: mes };
   cache.put(cacheKey, JSON.stringify(out), SHEETS_CACHE_TTL_SECONDS);
   return out;
 }
 
-function _buscarClickUp() {
+function _buscarClickUp(opts) {
+  opts = opts || {};
   var token = _cfg('CK_TOKEN', '');
   var workspaceId = _cfg('WORKSPACE_ID', '');
   var spacesJson = _cfg('CK_SPACES_JSON', '[]');
@@ -152,7 +170,7 @@ function _buscarClickUp() {
   if (!workspaceId) throw new Error('WORKSPACE_ID não configurado.');
 
   var cache = CacheService.getScriptCache();
-  var cached = cache.get('clickup_payload_v1');
+  var cached = opts.nocache ? null : cache.get('clickup_payload_v1');
   if (cached) return JSON.parse(cached);
 
   var spaces = JSON.parse(spacesJson || '[]');
@@ -170,7 +188,7 @@ function _buscarClickUp() {
       spaces = (JSON.parse(sresp.getContentText() || '{}').spaces || []).map(function(s){ return s.id; });
     } catch (e0) {}
   }
-  if (!spaces.length) return { clickup: [], meta: { total: 0, generatedAt: new Date().toISOString(), erro: 'Sem spaces válidos (CK_SPACES_JSON)' } };
+  if (!spaces.length) return { clickup: [], meta: { version: APP_VERSION, total: 0, generatedAt: new Date().toISOString(), erro: 'Sem spaces válidos (CK_SPACES_JSON)' } };
 
   // 1) Busca listas de todos os spaces (inclui listas sem pasta)
   var allLists = [];
@@ -279,7 +297,14 @@ function _buscarClickUp() {
     });
   });
 
-  var out = { clickup: projetos, meta: { total: projetos.length, generatedAt: new Date().toISOString() } };
+  var out = { clickup: projetos, meta: {
+    version: APP_VERSION,
+    total: projetos.length,
+    generatedAt: new Date().toISOString(),
+    spacesLidos: spaces.length,
+    listasLidas: allLists.length,
+    listasCandidatas: cronos.length
+  } };
   cache.put('clickup_payload_v1', JSON.stringify(out), CLICKUP_CACHE_TTL_SECONDS);
   return out;
 }

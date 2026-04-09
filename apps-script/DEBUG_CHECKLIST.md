@@ -8,8 +8,11 @@ Abra no navegador (logado na conta do Apps Script) e copie o retorno bruto:
 
 1. `SEU_WEBAPP_URL?mes=ALL&callback=cb`
 2. `SEU_WEBAPP_URL?action=clickup&callback=cb`
+3. `SEU_WEBAPP_URL?action=ping&callback=cb`
+4. `SEU_WEBAPP_URL?action=clickup&nocache=1&debug=1&callback=cb`
 
 > Envie print + texto retornado.
+> **Atenção:** `SEU_WEBAPP_URL` é um placeholder. Você precisa trocar pelo link real.
 
 ### Onde achar `SEU_WEBAPP_URL` sem ser desenvolvedor?
 
@@ -19,7 +22,13 @@ Opção mais simples (sem inspecionar):
 3. Copie a URL completa entre aspas.
 
 Exemplo atual do projeto:
-`https://script.google.com/macros/s/AKfycbyL5fXhIUU9sCVQzg528o4GblfqryafdjvRJVPN77u89cKo8BTl6YOYP6z85w7I6_h-/exec`
+`https://script.google.com/macros/s/AKfycbwC0UygsOMUVp-U6IaBE9Z4WSOG9B13XnWRXk4jeZ3a626qOkOLRoJmrJnjY4q-S5cj/exec`
+
+Exemplos prontos para colar no navegador (já com o link real):
+1. `https://script.google.com/macros/s/AKfycbwC0UygsOMUVp-U6IaBE9Z4WSOG9B13XnWRXk4jeZ3a626qOkOLRoJmrJnjY4q-S5cj/exec?mes=ALL&callback=cb`
+2. `https://script.google.com/macros/s/AKfycbwC0UygsOMUVp-U6IaBE9Z4WSOG9B13XnWRXk4jeZ3a626qOkOLRoJmrJnjY4q-S5cj/exec?action=clickup&callback=cb`
+3. `https://script.google.com/macros/s/AKfycbwC0UygsOMUVp-U6IaBE9Z4WSOG9B13XnWRXk4jeZ3a626qOkOLRoJmrJnjY4q-S5cj/exec?action=ping&callback=cb`
+4. `https://script.google.com/macros/s/AKfycbwC0UygsOMUVp-U6IaBE9Z4WSOG9B13XnWRXk4jeZ3a626qOkOLRoJmrJnjY4q-S5cj/exec?action=clickup&nocache=1&debug=1&callback=cb`
 
 ## B) Configuração atual do Apps Script
 
@@ -56,3 +65,13 @@ Se puder, envie também os nomes das abas existentes (JAN...DEZ) e um print do c
 ---
 
 Com esses itens, dá para fechar a causa raiz e entregar correção final sem suposição.
+
+## Interpretação rápida dos retornos
+
+- Se `action=ping` retornar `cb({"projetos":[]})`, você está em uma **versão antiga** do Web App (o `ping` não existe nela).
+- Se `action=clickup&nocache=1&debug=1` retornar igual a `action=clickup`, sua versão atual **não reconhece** `nocache/debug` (também indica deploy antigo).
+- Nesse caso:
+  1. Apps Script → Deploy → Manage deployments → Edit deployment;
+  2. selecionar **New version**;
+  3. confirmar e copiar a URL do deploy ativo;
+  4. garantir que o `APPS_SCRIPT_URL` do `index.html` aponta para essa mesma URL.

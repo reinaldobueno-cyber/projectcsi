@@ -74,6 +74,13 @@ Se faltar alguma propriedade, o retorno virá com erro tipo:
 - Deixar espaço extra no nome da chave (ex: `CK_TOKEN `).
 - Editar e não criar **New version** no deploy.
 
+### Se aparecer este erro no endpoint
+
+- `{"erro":"SHEET_ID não configurado."}`
+  - falta criar/preencher `SHEET_ID` em Script Properties (ou `QUICK_SHEET_ID` no modo rápido).
+- `{"erro":"CK_TOKEN não configurado."}`
+  - falta criar/preencher `CK_TOKEN` em Script Properties (ou `QUICK_CK_TOKEN` no modo rápido).
+
 ## 6) Passo final (GitHub PR)
 
 Depois que o endpoint responder corretamente no navegador, aí sim abra/atualize a PR no GitHub.
@@ -92,3 +99,12 @@ Se estiver com pressa, no `Code.gs` você pode preencher temporariamente:
 
 Esse modo evita depender de Script Properties no primeiro teste.
 Depois que validar, migre para Script Properties e limpe os valores sensíveis do código.
+
+### QUICK_CK_TOKEN ou CK_TOKEN?
+
+- **Produção (certo):** use `CK_TOKEN` em **Script Properties**.
+- **Teste rápido (temporário):** use `QUICK_CK_TOKEN` no `Code.gs`.
+
+Prioridade no código:
+1. Script Properties (`CK_TOKEN`)
+2. Fallback QUICK (`QUICK_CK_TOKEN`)
