@@ -107,4 +107,5 @@ Depois que validar, migre para Script Properties e limpe os valores sensíveis d
 
 Prioridade no código:
 1. Script Properties (`CK_TOKEN`)
-2. Fallback QUICK (`QUICK_CK_TOKEN`)
+2. Script Properties `QUICK_*` (compatibilidade)
+3. Fallback QUICK no código (`QUICK_CK_TOKEN`)

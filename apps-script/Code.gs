@@ -30,6 +30,9 @@ var QUICK_CK_SPACES_JSON = '';
 function _cfg(name, fallback) {
   var v = PropertiesService.getScriptProperties().getProperty(name);
   if (v !== null && v !== undefined && v !== '') return v;
+  // Compatibilidade: caso operador tenha criado QUICK_* em Script Properties
+  var vQuickProp = PropertiesService.getScriptProperties().getProperty('QUICK_' + name);
+  if (vQuickProp !== null && vQuickProp !== undefined && vQuickProp !== '') return vQuickProp;
 
   var quick = {
     SHEET_ID: QUICK_SHEET_ID,

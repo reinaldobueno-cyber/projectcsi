@@ -66,6 +66,17 @@ Se puder, envie também os nomes das abas existentes (JAN...DEZ) e um print do c
 
 Com esses itens, dá para fechar a causa raiz e entregar correção final sem suposição.
 
+## Teste rápido no GitHub Pages sem novo deploy
+
+Agora o painel aceita sobrescrever endpoint via querystring:
+
+`?apps_script_url=SEU_WEBAPP_URL`
+
+Exemplo:
+`https://reinaldobueno-cyber.github.io/projectcsi/?apps_script_url=https://script.google.com/macros/s/AKfy.../exec`
+
+Assim você valida o endpoint novo mesmo se a branch do site ainda não foi atualizada.
+
 ## Interpretação rápida dos retornos
 
 - Se `action=ping` retornar `cb({"projetos":[]})`, você está em uma **versão antiga** do Web App (o `ping` não existe nela).

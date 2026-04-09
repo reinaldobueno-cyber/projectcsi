@@ -2004,7 +2004,14 @@ function initAlert(){
 // ---- Google Sheets JSONP loader ----
 var _cbMap={};
 // URL do Google Apps Script - substitua pela sua URL apos implantar
-var APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwC0UygsOMUVp-U6IaBE9Z4WSOG9B13XnWRXk4jeZ3a626qOkOLRoJmrJnjY4q-S5cj/exec';
+var APPS_SCRIPT_URL_DEFAULT = 'https://script.google.com/macros/s/AKfycbwC0UygsOMUVp-U6IaBE9Z4WSOG9B13XnWRXk4jeZ3a626qOkOLRoJmrJnjY4q-S5cj/exec';
+var APPS_SCRIPT_URL = (function(){
+  try {
+    var p = new URLSearchParams(window.location.search).get('apps_script_url');
+    if (p && p.indexOf('script.google.com/macros/s/') >= 0) return p;
+  } catch(e) {}
+  return APPS_SCRIPT_URL_DEFAULT;
+})();
 var SHEET_TIMEOUT_MS = 60000;
 var SHEET_MAX_RETRIES = 2;
 var CLICKUP_TIMEOUT_MS = 60000;
