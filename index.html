@@ -2129,7 +2129,13 @@ function _finalizarLoad(projetos, isRefresh, motivo) {
 
   var temDados = projetos && projetos.length > 0;
   if (temDados) {
-    DATA.projetos = projetos;
+    DATA.projetos = (projetos || []).map(function(p){
+      var x = p || {};
+      var consultor = x.consultor || x.consultor_nome || x.consultorNome || x.implantador || x.responsavel || x.responsável || '';
+      var clickup = x.clickup || x.projeto_clickup || x.projetoClickup || x.clickup_url || x.clickupUrl || '';
+      var status = x.status || x.situacao || x.situação || '';
+      return Object.assign({}, x, { consultor: String(consultor || '').trim(), clickup: String(clickup || '').trim(), status: String(status || '').trim() });
+    });
     try {
       var ex = DATA.projetos[0] || {};
       console.info('[PMO] Sample planilha', {
@@ -2137,7 +2143,8 @@ function _finalizarLoad(projetos, isRefresh, motivo) {
         consultor: ex.consultor || '',
         clickup: ex.clickup || '',
         status: ex.status || '',
-        mes: ex.mes || ''
+        mes: ex.mes || '',
+        keys: Object.keys(ex || {})
       });
     } catch (eSample) {}
     try { localStorage.setItem('multsoft_pmo_data', JSON.stringify(DATA)); localStorage.setItem('multsoft_pmo_ts', String(Date.now())); } catch(e) {}
