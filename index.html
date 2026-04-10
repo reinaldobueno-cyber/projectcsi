@@ -2169,6 +2169,7 @@ var MESES=['JAN','FEV','MAR','ABR','MAI','JUN','JUL','AGO','SET','OUT','NOV','DE
 // ABA CLICKUP
 var _ckFilter = 'all';
 var _ckCache  = {}; // cliente_norm -> dados reais CK
+var _ckByListId = {}; // listId -> dados reais CK
 var _ckWorkspaceId = '';
 
 function _normCK(s) {
@@ -2192,6 +2193,21 @@ function _ckSearchUrl(nome){
   if (_ckWorkspaceId) return 'https://app.clickup.com/' + _ckWorkspaceId + '/search?query=' + q;
   return 'https://app.clickup.com/search?query=' + q;
 }
+function _ckListIdFrom(v){
+  var s = String(v || '').trim();
+  if (!s) return '';
+  var m = s.match(/\/v\/li\/(\d+)/i) || s.match(/(?:^|[^\d])(\d{8,})(?:[^\d]|$)/);
+  return m ? String(m[1]) : '';
+}
+function _ckUrlFromProjeto(p){
+  if (!p || !p.clickup) return null;
+  var raw = String(p.clickup).trim();
+  if (!raw) return null;
+  if (/^https?:\/\//i.test(raw)) return raw;
+  var listId = _ckListIdFrom(raw);
+  if (listId && _ckWorkspaceId) return 'https://app.clickup.com/' + _ckWorkspaceId + '/v/li/' + listId;
+  return null;
+}
 function _ckAliases(nome){
   var base = _normCK(nome);
   if (!base) return [];
@@ -2210,6 +2226,14 @@ function _ckSalvarAliases(nome, payload){
     if (!atual || (!atual.folderUrl && payload.folderUrl)) _ckCache[k] = payload;
   });
 }
+function _ckSalvarDoItem(item, payload){
+  var nomes = [];
+  var principal = _ckClientName(item);
+  if (principal) nomes.push(principal);
+  if (item && Array.isArray(item.nomes)) nomes = nomes.concat(item.nomes);
+  if (item && Array.isArray(item.aliases)) nomes = nomes.concat(item.aliases);
+  nomes.filter(Boolean).forEach(function(n){ _ckSalvarAliases(n, payload); });
+}
 function _ckNomeScore(a, b){
   var wa = _normCK(a).split(' ').filter(function(x){ return x.length >= 3; });
   var wb = _normCK(b).split(' ').filter(function(x){ return x.length >= 3; });
@@ -2223,8 +2247,8 @@ function _ckNomeScore(a, b){
   });
   return (2 * hit) / (wa.length + wb.length);
 }
-function _ckBuscarProjeto(nome){
-  var aliases = _ckAliases(nome);
+function _ckBuscarProjetoRef(nome){
+  var aliases = _ckAliases(nome || '');
   for (var i=0;i<aliases.length;i++) {
     var achou = _ckCache[aliases[i]];
     if (achou) return achou;
@@ -2241,11 +2265,17 @@ function _ckBuscarProjeto(nome){
   for (var j=0;j<keys.length;j++) {
     var cand = _ckCache[keys[j]];
     if (!cand || !cand.nomeRef) continue;
-    var score = _ckNomeScore(nome, cand.nomeRef);
+    var score = _ckNomeScore(nome || '', cand.nomeRef);
     if (score > bestScore) { bestScore = score; best = cand; }
   }
   if (best && bestScore >= 0.72) return best;
   return null;
+}
+function _ckBuscarProjeto(p){
+  if (!p) return null;
+  var listId = _ckListIdFrom(p.clickup);
+  if (listId && _ckByListId[listId]) return _ckByListId[listId];
+  return _ckBuscarProjetoRef(p.cliente);
 }
 function _ckListaNomes(items){
   return items.map(function(x){ return x && x.p ? x.p.cliente : ''; }).filter(Boolean);
@@ -2256,7 +2286,7 @@ function _ckListaResumoHtml(items, vazioTxt){
 }
 function _ckCopiarLista(tipo){
   var base = filteredProj().map(function(p){
-    return { p:p, temCK: !!_ckBuscarProjeto(p.cliente) };
+    return { p:p, temCK: !!_ckBuscarProjeto(p) };
   });
   var itens = tipo === 'has' ? base.filter(function(x){ return x.temCK; }) : base.filter(function(x){ return !x.temCK; });
   var txt = _ckListaNomes(itens).join('\n');
@@ -2283,7 +2313,7 @@ function _renderCk(proj) {
 
   // Monta lista combinando riscos da planilha + dados reais do CK
   var lista = proj.map(function(p) {
-    var ck    = _ckBuscarProjeto(p.cliente);
+    var ck    = _ckBuscarProjeto(p);
     var score = 0;
     var riscos = [], acoes = [];
 
@@ -2295,6 +2325,7 @@ function _renderCk(proj) {
 
     // Dados reais do CK
     var dias=null, totalF=0, doneF=0, pendF=0, progresso=null;
+    var marcosTotal=0, marcosDone=0, marcosPend=0;
     var fasesPend=[], fasesDone=[], ckConsultor=null, folderUrl=null;
 
     if (ck) {
@@ -2306,6 +2337,9 @@ function _renderCk(proj) {
       doneF    = fasesDone.length;
       pendF    = fasesPend.length;
       progresso = totalF>0 ? Math.round(doneF/totalF*100) : 0;
+      marcosTotal = typeof ck.marcosTotal === 'number' ? ck.marcosTotal : 0;
+      marcosDone  = typeof ck.marcosDone === 'number' ? ck.marcosDone : 0;
+      marcosPend  = typeof ck.marcosPend === 'number' ? ck.marcosPend : Math.max(0, marcosTotal - marcosDone);
 
       // Riscos baseados em dados reais CK
       if (dias>=21) { riscos.push({t:'crit',msg:dias+'d sem nenhuma atualiza\u00e7\u00e3o no ClickUp'}); score+=70; acoes.push('Consultor parado h\u00e1 '+dias+' dias \u2014 cobrar atualiza\u00e7\u00e3o'); }
@@ -2320,7 +2354,8 @@ function _renderCk(proj) {
     return {p:p, score:score, dias:dias, riscos:riscos, acoes:acoes,
             progresso:progresso, totalF:totalF, doneF:doneF, pendF:pendF,
             fasesPend:fasesPend, fasesDone:fasesDone,
-            ckConsultor:ckConsultor, folderUrl:folderUrl, temCK:!!ck};
+            ckConsultor:ckConsultor, folderUrl:folderUrl, temCK:!!ck,
+            marcosTotal:marcosTotal, marcosDone:marcosDone, marcosPend:marcosPend};
   }).sort(function(a,b){return b.score-a.score;});
 
   var nCrit=lista.filter(function(x){return x.score>=60;}).length;
@@ -2398,7 +2433,8 @@ function _renderCk(proj) {
             '<div style="height:100%;width:'+item.progresso+'%;background:'+(item.progresso>=75?'var(--green)':item.progresso>=40?'var(--orange)':'var(--red)')+';border-radius:4px"></div>' +
           '</div>' +
           '<span style="font-size:12px;font-weight:800;color:'+(item.progresso>=75?'var(--green)':item.progresso>=40?'var(--orange)':'var(--red)')+'">'+item.progresso+'%</span>' +
-          '<span style="font-size:11px;color:var(--muted)">'+item.doneF+'/'+item.totalF+' fases</span>' +
+          '<span style="font-size:11px;color:var(--muted)">'+item.doneF+'/'+item.totalF+' tasks</span>' +
+          (item.marcosTotal>0?'<span style="font-size:11px;color:var(--muted)">• '+item.marcosDone+'/'+item.marcosTotal+' marcos</span>':'') +
         '</div>' +
         // Consultor real CK
         '<div style="font-size:11px;color:var(--muted);margin-bottom:10px">'+
@@ -2475,8 +2511,8 @@ function _renderCk(proj) {
     // \u2500\u2500 Footer com link \u2500\u2500
     var fBloco =
       '<div class="ck-section" style="display:flex;align-items:center;gap:10px">'+
-        (item.folderUrl ?
-          '<a href="'+item.folderUrl+'" target="_blank" onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;gap:6px;background:var(--nav);color:#fff;padding:6px 14px;border-radius:7px;font-size:11px;font-weight:700;text-decoration:none">\uD83D\uDD17 Abrir projeto no ClickUp</a>' :
+        ((item.folderUrl || _ckUrlFromProjeto(p)) ?
+          '<a href="'+(item.folderUrl || _ckUrlFromProjeto(p))+'" target="_blank" onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;gap:6px;background:var(--nav);color:#fff;padding:6px 14px;border-radius:7px;font-size:11px;font-weight:700;text-decoration:none">\uD83D\uDD17 Abrir projeto no ClickUp</a>' :
           '<a href="'+_ckSearchUrl(p.cliente)+'" target="_blank" onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;gap:6px;background:var(--surf2);color:var(--nav);border:1.5px solid var(--nav);padding:6px 14px;border-radius:7px;font-size:11px;font-weight:700;text-decoration:none">\uD83D\uDD0D Buscar cliente no ClickUp</a>')+
         (item.temCK ?
           '<span style="font-size:10px;color:var(--green);font-weight:600">\u2705 Dados reais do ClickUp carregados</span>' :
@@ -2518,6 +2554,8 @@ function _ckBuscar() {
     showToast('Configure o APPS_SCRIPT_URL no c\u00f3digo','err');
     _renderCk(filteredProj()); return;
   }
+  _ckCache = {};
+  _ckByListId = {};
 
   function tentarCK(attempt){
     var done=false, cbName='_ckCb'+Date.now()+'_'+attempt;
@@ -2540,6 +2578,7 @@ function _ckBuscar() {
         if (attempt < CLICKUP_MAX_RETRIES) { console.warn('[PMO] Erro ClickUp tentativa', attempt + 1, 'de', CLICKUP_MAX_RETRIES + 1, resp.erro); tentarCK(attempt+1); return; }
         showToast('Erro: '+resp.erro,'err'); _renderCk(filteredProj()); return;
       }
+      if (resp && resp.meta) _ckWorkspaceId = String(resp.meta.workspace || resp.meta.team || _ckWorkspaceId || '');
       var ckList=(resp&&resp.clickup)||[];
       if(!ckList.length){
         if (attempt < CLICKUP_MAX_RETRIES) { console.warn('[PMO] Resposta vazia ClickUp tentativa', attempt + 1, 'de', CLICKUP_MAX_RETRIES + 1); tentarCK(attempt+1); return; }
@@ -2554,6 +2593,10 @@ function _ckBuscar() {
           lastUpdate:    item.lastUpdate    || Date.now(),
           diasSemUpdate: typeof item.diasSemUpdate==='number' ? item.diasSemUpdate : 99,
           consultor:     item.consultor     || null,
+          listId:        item.listId || item.list_id || null,
+          marcosTotal:   typeof item.marcosTotal==='number' ? item.marcosTotal : null,
+          marcosDone:    typeof item.marcosDone==='number' ? item.marcosDone : null,
+          marcosPend:    typeof item.marcosPend==='number' ? item.marcosPend : null,
           fases:        (item.fases||[]).map(function(f){
             var st=String(f.status||'').toLowerCase();
             return {nome:f.nome||f.name||'', status:f.status||'', done:!!(f.done||/done|closed|conclu/i.test(st)), assignee:f.assignee||null};
@@ -2561,10 +2604,13 @@ function _ckBuscar() {
           folderUrl:     _ckFolderUrl(item),
           nomeRef:       clienteNome
         };
-        _ckSalvarAliases(clienteNome, payload);
+        if (!payload.folderUrl && payload.listId && _ckWorkspaceId) {
+          payload.folderUrl = 'https://app.clickup.com/' + _ckWorkspaceId + '/v/li/' + payload.listId;
+        }
+        _ckSalvarDoItem(item, payload);
+        if (payload.listId) _ckByListId[String(payload.listId)] = payload;
         n++;
       });
-      if (resp && resp.meta) _ckWorkspaceId = String(resp.meta.workspace || resp.meta.team || _ckWorkspaceId || '');
       showToast(n+' projetos com dados reais do ClickUp!','ok');
       _renderCk(filteredProj());
     };

@@ -3,7 +3,7 @@
 // Objetivo: sair do loop e colocar o painel no ar rapidamente.
 // ============================================================
 
-var RESET_VERSION = 'reset-v1';
+var RESET_VERSION = 'reset-v2';
 var RESET_TASK_PAGES = 2; // páginas do endpoint team/task
 
 function doGet(e) {
@@ -97,7 +97,7 @@ function _clickupRecent() {
 
   var hdrs = { Authorization: token };
 
-  // Modo 1 (preferencial): spaces/folders de projetos -> cliente = nome da pasta
+  // Modo 1 (preferencial): spaces/folders/listas de projetos -> cliente = nome da pasta/lista
   var projetos = _clickupByProjectFolders(team, hdrs);
   if (projetos.length) {
     return { clickup: projetos, meta: { version: RESET_VERSION, total: projetos.length, fonte: 'folders' } };
@@ -118,59 +118,164 @@ function _clickupRecent() {
   tasks.forEach(function(t){
     var listId = t.list && t.list.id ? String(t.list.id) : '';
     if (!listId) return;
-    if (!byList[listId]) byList[listId] = { cliente:(t.folder&&t.folder.name)||(t.list&&t.list.name)||'Sem nome', listId:listId, folderUrl:'https://app.clickup.com/'+team+'/v/li/'+listId, lastUpdate:0, consultor:null, fases:[], done:0 };
+    if (!byList[listId]) byList[listId] = { cliente:(t.folder&&t.folder.name)||(t.list&&t.list.name)||'Sem nome', listId:listId, folderUrl:'https://app.clickup.com/'+team+'/v/li/'+listId, lastUpdate:0, consultor:null, fases:[], done:0, marcosTotal:0, marcosDone:0, aliases:[] };
     var upd = parseInt(t.date_updated || t.date_created || '0',10);
     if (upd > byList[listId].lastUpdate) { byList[listId].lastUpdate = upd; byList[listId].consultor = (t.assignees&&t.assignees.length)?(t.assignees[0].username||null):null; }
     var st = String((t.status && (t.status.status || t.status)) || '').toLowerCase();
     var isDone = st === 'done' || st === 'closed' || st === 'complete' || st.indexOf('conclu') >= 0;
     if (isDone) byList[listId].done++;
+    var isMarco = _isMilestoneTask(t);
+    if (isMarco) {
+      byList[listId].marcosTotal++;
+      if (isDone) byList[listId].marcosDone++;
+    }
     byList[listId].fases.push({ nome:t.name||'', status:(t.status&&(t.status.status||t.status))||'', done:isDone, assignee:(t.assignees&&t.assignees.length)?(t.assignees[0].username||null):null });
+    _pushAlias(byList[listId].aliases, (t.folder&&t.folder.name)||'');
+    _pushAlias(byList[listId].aliases, (t.list&&t.list.name)||'');
+    _pushAlias(byList[listId].aliases, (t.space&&t.space.name)||'');
   });
   var fallback = Object.keys(byList).map(function(k){
     var x = byList[k], total = x.fases.length;
-    return { cliente:x.cliente, listId:x.listId, folderUrl:x.folderUrl, lastUpdate:x.lastUpdate, diasSemUpdate:x.lastUpdate>0?Math.floor((Date.now()-x.lastUpdate)/86400000):999, consultor:x.consultor, fases:x.fases, progresso:total?Math.round(x.done/total*100):0, totalFases:total, fasesDone:x.done, fasesPend:total-x.done };
+    return { cliente:x.cliente, listId:x.listId, folderUrl:x.folderUrl, lastUpdate:x.lastUpdate, diasSemUpdate:x.lastUpdate>0?Math.floor((Date.now()-x.lastUpdate)/86400000):999, consultor:x.consultor, fases:x.fases, progresso:total?Math.round(x.done/total*100):0, totalFases:total, fasesDone:x.done, fasesPend:total-x.done, marcosTotal:x.marcosTotal, marcosDone:x.marcosDone, marcosPend:Math.max(0, x.marcosTotal - x.marcosDone), aliases:x.aliases };
   });
   return { clickup: fallback, meta: { version: RESET_VERSION, total: fallback.length, tasksLidas: tasks.length, fonte: 'team-task-fallback' } };
 }
 
 function _clickupByProjectFolders(team, hdrs) {
   try {
-    var sresp = UrlFetchApp.fetch('https://api.clickup.com/api/v2/team/' + team + '/space?archived=false', { headers: hdrs, muteHttpExceptions: true });
-    var spaces = JSON.parse(sresp.getContentText() || '{}').spaces || [];
-    // prioriza spaces de projeto
-    spaces = spaces.filter(function(s){
-      var n = String(s.name || '').toLowerCase();
-      return n.indexOf('projeto') >= 0 || n.indexOf('implant') >= 0 || n.indexOf('csi') >= 0;
-    });
+    var spaces = _listSpaces(team, hdrs);
     if (!spaces.length) return [];
 
-    var out = [];
+    var byList = {};
     spaces.forEach(function(sp){
-      var fresp = UrlFetchApp.fetch('https://api.clickup.com/api/v2/space/' + sp.id + '/folder?archived=false', { headers: hdrs, muteHttpExceptions: true });
-      var folders = JSON.parse(fresp.getContentText() || '{}').folders || [];
+      var folders = _listFolders(sp.id, hdrs);
       folders.forEach(function(fd){
-        var lresp = UrlFetchApp.fetch('https://api.clickup.com/api/v2/folder/' + fd.id + '/list?archived=false', { headers: hdrs, muteHttpExceptions: true });
-        var listas = JSON.parse(lresp.getContentText() || '{}').lists || [];
-        var cron = null;
-        for (var i=0;i<listas.length;i++) {
-          var ln = String(listas[i].name||'').toLowerCase();
-          if (ln.indexOf('cronograma') >= 0 || ln.indexOf('implant') >= 0) { cron = listas[i]; break; }
-        }
-        if (!cron) return;
-        var tresp = UrlFetchApp.fetch('https://api.clickup.com/api/v2/list/' + cron.id + '/task?include_closed=true&page=0&order_by=updated&reverse=true', { headers: hdrs, muteHttpExceptions: true });
-        var tasks = JSON.parse(tresp.getContentText() || '{}').tasks || [];
-        if (!tasks.length) return;
-        var last=0, done=0, consultor=null, fases=[];
-        tasks.forEach(function(t){
-          var upd=parseInt(t.date_updated||t.date_created||'0',10); if(upd>last){last=upd; consultor=(t.assignees&&t.assignees.length)?(t.assignees[0].username||null):consultor;}
-          var st=String((t.status&&(t.status.status||t.status))||'').toLowerCase(); var isDone=st==='done'||st==='closed'||st==='complete'||st.indexOf('conclu')>=0; if(isDone) done++;
-          fases.push({nome:t.name||'',status:(t.status&&(t.status.status||t.status))||'',done:isDone,assignee:(t.assignees&&t.assignees.length)?(t.assignees[0].username||null):null});
-        });
-        out.push({cliente:fd.name||'Sem nome',listId:cron.id,folderUrl:'https://app.clickup.com/'+team+'/v/li/'+cron.id,lastUpdate:last,diasSemUpdate:last>0?Math.floor((Date.now()-last)/86400000):999,consultor:consultor,fases:fases,progresso:fases.length?Math.round(done/fases.length*100):0,totalFases:fases.length,fasesDone:done,fasesPend:fases.length-done});
+        var listas = _listFolderLists(fd.id, hdrs);
+        var cronList = _pickBestList(listas);
+        if (!cronList) return;
+        var metric = _summarizeList(cronList.id, hdrs, fd.name || cronList.name || 'Sem nome');
+        if (!metric.totalFases) return;
+        metric.listId = cronList.id;
+        metric.folderUrl = 'https://app.clickup.com/' + team + '/v/li/' + cronList.id;
+        metric.aliases = _unique([(fd.name || ''), (cronList.name || ''), (sp.name || '')]);
+        byList[String(metric.listId)] = metric;
+      });
+
+      // também captura listas sem pasta
+      var listasSpace = _listSpaceLists(sp.id, hdrs);
+      listasSpace.forEach(function(li){
+        if (byList[String(li.id)]) return;
+        if (!_isProjectListName(li.name)) return;
+        var metric = _summarizeList(li.id, hdrs, li.name || 'Sem nome');
+        if (!metric.totalFases) return;
+        metric.listId = li.id;
+        metric.folderUrl = 'https://app.clickup.com/' + team + '/v/li/' + li.id;
+        metric.aliases = _unique([(li.name || ''), (sp.name || '')]);
+        byList[String(metric.listId)] = metric;
       });
     });
-    return out;
+    return Object.keys(byList).map(function(k){ return byList[k]; });
   } catch (e) {
     return [];
   }
+}
+
+function _listSpaces(team, hdrs){
+  var forced = _cfg('CK_SPACES_JSON');
+  if (forced) {
+    try {
+      var ids = JSON.parse(forced);
+      if (Array.isArray(ids) && ids.length) {
+        return ids.map(function(id){ return { id: String(id), name: 'forced-space-'+id }; });
+      }
+    } catch (eForced) {}
+  }
+  var sresp = UrlFetchApp.fetch('https://api.clickup.com/api/v2/team/' + team + '/space?archived=false', { headers: hdrs, muteHttpExceptions: true });
+  var spaces = JSON.parse(sresp.getContentText() || '{}').spaces || [];
+  return spaces.filter(function(s){
+    var n = String(s.name || '').toLowerCase();
+    return n.indexOf('projeto') >= 0 || n.indexOf('implant') >= 0 || n.indexOf('csi') >= 0 || n.indexOf('cliente') >= 0;
+  });
+}
+function _listFolders(spaceId, hdrs){
+  var fresp = UrlFetchApp.fetch('https://api.clickup.com/api/v2/space/' + spaceId + '/folder?archived=false', { headers: hdrs, muteHttpExceptions: true });
+  return JSON.parse(fresp.getContentText() || '{}').folders || [];
+}
+function _listFolderLists(folderId, hdrs){
+  var lresp = UrlFetchApp.fetch('https://api.clickup.com/api/v2/folder/' + folderId + '/list?archived=false', { headers: hdrs, muteHttpExceptions: true });
+  return JSON.parse(lresp.getContentText() || '{}').lists || [];
+}
+function _listSpaceLists(spaceId, hdrs){
+  var lresp = UrlFetchApp.fetch('https://api.clickup.com/api/v2/space/' + spaceId + '/list?archived=false', { headers: hdrs, muteHttpExceptions: true });
+  return JSON.parse(lresp.getContentText() || '{}').lists || [];
+}
+function _isProjectListName(name){
+  var n = String(name || '').toLowerCase();
+  if (!n) return false;
+  if (n.indexOf('template') >= 0 || n.indexOf('modelo') >= 0) return false;
+  return n.indexOf('cronograma') >= 0 || n.indexOf('implant') >= 0 || n.indexOf('projeto') >= 0 || n.indexOf('execu') >= 0 || n.indexOf('entrega') >= 0;
+}
+function _pickBestList(listas){
+  if (!listas || !listas.length) return null;
+  var picked = null;
+  for (var i=0;i<listas.length;i++){
+    var n = String(listas[i].name || '').toLowerCase();
+    if (n.indexOf('cronograma') >= 0 || n.indexOf('implant') >= 0) return listas[i];
+    if (!picked && _isProjectListName(n)) picked = listas[i];
+  }
+  return picked || listas[0];
+}
+function _summarizeList(listId, hdrs, clienteNome){
+  var tresp = UrlFetchApp.fetch('https://api.clickup.com/api/v2/list/' + listId + '/task?include_closed=true&page=0&order_by=updated&reverse=true', { headers: hdrs, muteHttpExceptions: true });
+  var tasks = JSON.parse(tresp.getContentText() || '{}').tasks || [];
+  var last=0, done=0, consultor=null, fases=[], marcosTotal=0, marcosDone=0;
+  tasks.forEach(function(t){
+    if (t.parent) return;
+    var upd=parseInt(t.date_updated||t.date_created||'0',10);
+    if(upd>last){last=upd; consultor=(t.assignees&&t.assignees.length)?(t.assignees[0].username||null):consultor;}
+    var st=String((t.status&&(t.status.status||t.status))||'').toLowerCase();
+    var isDone=st==='done'||st==='closed'||st==='complete'||st.indexOf('conclu')>=0;
+    if(isDone) done++;
+    var isMarco = _isMilestoneTask(t);
+    if (isMarco) {
+      marcosTotal++;
+      if (isDone) marcosDone++;
+    }
+    fases.push({nome:t.name||'',status:(t.status&&(t.status.status||t.status))||'',done:isDone,assignee:(t.assignees&&t.assignees.length)?(t.assignees[0].username||null):null});
+  });
+  var total = fases.length;
+  return {
+    cliente: clienteNome || 'Sem nome',
+    lastUpdate:last,
+    diasSemUpdate:last>0?Math.floor((Date.now()-last)/86400000):999,
+    consultor:consultor,
+    fases:fases,
+    progresso:total?Math.round(done/total*100):0,
+    totalFases:total,
+    fasesDone:done,
+    fasesPend:total-done,
+    marcosTotal:marcosTotal,
+    marcosDone:marcosDone,
+    marcosPend:Math.max(0, marcosTotal-marcosDone)
+  };
+}
+function _isMilestoneTask(t){
+  var n = String((t && t.name) || '').toLowerCase();
+  if (n.indexOf('marco') >= 0 || n.indexOf('milestone') >= 0) return true;
+  var tags = (t && t.tags) || [];
+  for (var i=0;i<tags.length;i++){
+    var tg = String(tags[i] && tags[i].name || '').toLowerCase();
+    if (tg.indexOf('marco') >= 0 || tg.indexOf('milestone') >= 0) return true;
+  }
+  return false;
+}
+function _pushAlias(arr, v){
+  var s = String(v || '').trim();
+  if (!s) return;
+  if (arr.indexOf(s) === -1) arr.push(s);
+}
+function _unique(items){
+  var out = [];
+  (items || []).forEach(function(v){ _pushAlias(out, v); });
+  return out;
 }
