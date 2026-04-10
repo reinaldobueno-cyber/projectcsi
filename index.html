@@ -2186,7 +2186,7 @@ function _ckClientName(item){
   return item && (item.cliente || item.cliente_nome || item.clienteNome || item.nome || item.projeto || item.project || '');
 }
 function _ckFolderUrl(item){
-  return item && (item.folderUrl || item.folder_url || item.url || item.link || null);
+  return item && (item.folderUrl || item.folder_url || item.listUrl || item.taskUrl || item.url || item.link || null);
 }
 function _ckSearchUrl(nome){
   var q = encodeURIComponent(nome || '');
@@ -2604,6 +2604,7 @@ function _ckBuscar() {
           folderUrl:     _ckFolderUrl(item),
           nomeRef:       clienteNome
         };
+        if (payload.folderUrl && payload.folderUrl.indexOf('/not-found-team') >= 0) payload.folderUrl = null;
         if (!payload.folderUrl && payload.listId && _ckWorkspaceId) {
           payload.folderUrl = 'https://app.clickup.com/' + _ckWorkspaceId + '/v/li/' + payload.listId;
         }

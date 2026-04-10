@@ -118,7 +118,7 @@ function _clickupRecent() {
   tasks.forEach(function(t){
     var listId = t.list && t.list.id ? String(t.list.id) : '';
     if (!listId) return;
-    if (!byList[listId]) byList[listId] = { cliente:(t.folder&&t.folder.name)||(t.list&&t.list.name)||'Sem nome', listId:listId, folderUrl:'https://app.clickup.com/'+team+'/v/li/'+listId, lastUpdate:0, consultor:null, fases:[], done:0, marcosTotal:0, marcosDone:0, aliases:[] };
+    if (!byList[listId]) byList[listId] = { cliente:(t.folder&&t.folder.name)||(t.list&&t.list.name)||'Sem nome', listId:listId, folderUrl:(t.list&&t.list.url)||t.url||('https://app.clickup.com/'+team+'/v/li/'+listId), lastUpdate:0, consultor:null, fases:[], done:0, marcosTotal:0, marcosDone:0, aliases:[] };
     var upd = parseInt(t.date_updated || t.date_created || '0',10);
     if (upd > byList[listId].lastUpdate) { byList[listId].lastUpdate = upd; byList[listId].consultor = (t.assignees&&t.assignees.length)?(t.assignees[0].username||null):null; }
     var st = String((t.status && (t.status.status || t.status)) || '').toLowerCase();
@@ -130,6 +130,7 @@ function _clickupRecent() {
       if (isDone) byList[listId].marcosDone++;
     }
     byList[listId].fases.push({ nome:t.name||'', status:(t.status&&(t.status.status||t.status))||'', done:isDone, assignee:(t.assignees&&t.assignees.length)?(t.assignees[0].username||null):null });
+    if (!byList[listId].folderUrl && t.url) byList[listId].folderUrl = t.url;
     _pushAlias(byList[listId].aliases, (t.folder&&t.folder.name)||'');
     _pushAlias(byList[listId].aliases, (t.list&&t.list.name)||'');
     _pushAlias(byList[listId].aliases, (t.space&&t.space.name)||'');
@@ -153,10 +154,10 @@ function _clickupByProjectFolders(team, hdrs) {
         var listas = _listFolderLists(fd.id, hdrs);
         var cronList = _pickBestList(listas);
         if (!cronList) return;
-        var metric = _summarizeList(cronList.id, hdrs, fd.name || cronList.name || 'Sem nome');
+        var metric = _summarizeList(cronList.id, hdrs, fd.name || cronList.name || 'Sem nome', cronList.url || '');
         if (!metric.totalFases) return;
         metric.listId = cronList.id;
-        metric.folderUrl = 'https://app.clickup.com/' + team + '/v/li/' + cronList.id;
+        metric.folderUrl = cronList.url || ('https://app.clickup.com/' + team + '/v/li/' + cronList.id);
         metric.aliases = _unique([(fd.name || ''), (cronList.name || ''), (sp.name || '')]);
         byList[String(metric.listId)] = metric;
       });
@@ -166,10 +167,10 @@ function _clickupByProjectFolders(team, hdrs) {
       listasSpace.forEach(function(li){
         if (byList[String(li.id)]) return;
         if (!_isProjectListName(li.name)) return;
-        var metric = _summarizeList(li.id, hdrs, li.name || 'Sem nome');
+        var metric = _summarizeList(li.id, hdrs, li.name || 'Sem nome', li.url || '');
         if (!metric.totalFases) return;
         metric.listId = li.id;
-        metric.folderUrl = 'https://app.clickup.com/' + team + '/v/li/' + li.id;
+        metric.folderUrl = li.url || ('https://app.clickup.com/' + team + '/v/li/' + li.id);
         metric.aliases = _unique([(li.name || ''), (sp.name || '')]);
         byList[String(metric.listId)] = metric;
       });
@@ -225,7 +226,7 @@ function _pickBestList(listas){
   }
   return picked || listas[0];
 }
-function _summarizeList(listId, hdrs, clienteNome){
+function _summarizeList(listId, hdrs, clienteNome, listUrl){
   var tresp = UrlFetchApp.fetch('https://api.clickup.com/api/v2/list/' + listId + '/task?include_closed=true&page=0&order_by=updated&reverse=true', { headers: hdrs, muteHttpExceptions: true });
   var tasks = JSON.parse(tresp.getContentText() || '{}').tasks || [];
   var last=0, done=0, consultor=null, fases=[], marcosTotal=0, marcosDone=0;
@@ -256,7 +257,8 @@ function _summarizeList(listId, hdrs, clienteNome){
     fasesPend:total-done,
     marcosTotal:marcosTotal,
     marcosDone:marcosDone,
-    marcosPend:Math.max(0, marcosTotal-marcosDone)
+    marcosPend:Math.max(0, marcosTotal-marcosDone),
+    folderUrl: listUrl || ''
   };
 }
 function _isMilestoneTask(t){
