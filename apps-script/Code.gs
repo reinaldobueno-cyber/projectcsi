@@ -148,6 +148,15 @@ function _buscarSheets(e, opts) {
       }
       return -1;
     }
+    function colContains(tokens) {
+      for (var i=0;i<hdrs.length;i++) {
+        var h = String(hdrs[i] || '').toUpperCase();
+        for (var t=0;t<tokens.length;t++) {
+          if (h.indexOf(tokens[t]) >= 0) return i;
+        }
+      }
+      return -1;
+    }
     function v(row, n) { var i=col(n); return i>=0?String(row[i]||'').trim():''; }
     function vAny(row, names) { var i=colAny(names); return i>=0?String(row[i]||'').trim():''; }
     function num(row, n) { var i=col(n); if(i<0)return null; var x=parseFloat(row[i]); return isNaN(x)?null:x; }
@@ -169,14 +178,17 @@ function _buscarSheets(e, opts) {
       return String(val).trim();
     }
 
+    var idxConsultor = colAny(['CONSULTOR','CONSULTOR(A)','CONSULTOR RESPONSAVEL','CONSULTOR RESPONSÁVEL']);
+    if (idxConsultor < 0) idxConsultor = colContains(['CONSULTOR','IMPLANTADOR','RESPONSAVEL']);
     for (var r=hdrRowIndex+1; r<data.length; r++) {
       var row=data[r];
       var cliente=vAny(row,['CLIENTE','CLIENTE / FAZENDA','NOME CLIENTE']);
       if (!cliente) continue;
       var dc=numAny(row,['QNT DI','QNTD DI','DIARIAS CONTRATADAS']);
       var dr=numAny(row,['REALIZADAS','DIARIAS REALIZADAS']);
+      var consultorVal = idxConsultor >= 0 ? String(row[idxConsultor] || '').trim() : '';
       result.push({
-        mes:m, cliente:cliente, consultor:vAny(row,['CONSULTOR','CONSULTOR(A)']), pacote:v(row,'PACOTE'),
+        mes:m, cliente:cliente, consultor:consultorVal, pacote:v(row,'PACOTE'),
         adicionais:v(row,'ADICIONAIS'), tipo:v(row,'TIPO'), vendedor:v(row,'VENDEDOR'),
         formato:v(row,'FORMATO'), cidade:v(row,'CIDADE'), data_venda:dtAny(row,['DATA DA VENDA','DATA VENDA']),
         kickoff:vAny(row,['KICK OFF REALIZADO','KICKOFF']), data_kick:dtAny(row,['DATA KICK OFF','DATA KICKOFF']),

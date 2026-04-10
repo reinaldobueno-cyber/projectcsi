@@ -12,7 +12,7 @@ function doGet(e) {
   var out;
   try {
     if (action === 'ping') out = _ping();
-    else if (action === 'clickup') out = _clickupRecent();
+    else if (action === 'clickup') out = _clickupRecent(e);
     else out = _sheetsAll();
   } catch (err) {
     out = { erro: String(err && err.message ? err.message : err), version: RESET_VERSION, action: action };
@@ -60,8 +60,18 @@ function _sheetsAll() {
       for (var n=0;n<names.length;n++){ var k=hdrs.indexOf(names[n]); if(k>=0) return k; }
       return -1;
     }
+    function idxContains(tokens){
+      for (var i=0;i<hdrs.length;i++){
+        var h = String(hdrs[i] || '').toUpperCase();
+        for (var t=0;t<tokens.length;t++){
+          if (h.indexOf(tokens[t]) >= 0) return i;
+        }
+      }
+      return -1;
+    }
     var iCliente = idx(['CLIENTE','CLIENTE / FAZENDA','NOME CLIENTE']);
-    var iCons    = idx(['CONSULTOR','CONSULTOR(A)']);
+    var iCons    = idx(['CONSULTOR','CONSULTOR(A)','CONSULTOR RESPONSAVEL','CONSULTOR RESPONSÁVEL']);
+    if (iCons < 0) iCons = idxContains(['CONSULTOR','IMPLANTADOR','RESPONSAVEL']);
     var iStatus  = idx(['STATUS']);
     var iVend    = idx(['VENDEDOR']);
     var iClick   = idx(['PROJETO CLICKUP','CLICKUP']);
@@ -89,13 +99,22 @@ function _sheetsAll() {
   return { projetos: out, meta: { version: RESET_VERSION, total: out.length } };
 }
 
-function _clickupRecent() {
+function _clickupRecent(e) {
   var token = _cfg('CK_TOKEN');
   var team = _cfg('WORKSPACE_ID');
   if (!token) throw new Error('CK_TOKEN não configurado');
   if (!team) throw new Error('WORKSPACE_ID não configurado');
 
   var hdrs = { Authorization: token };
+  var listIds = _parseListIds(e);
+
+  // Modo 0 (prioridade): listas vindas da própria planilha (link/id)
+  if (listIds.length) {
+    var fromListIds = _clickupByListIds(listIds, team, hdrs);
+    if (fromListIds.length) {
+      return { clickup: fromListIds, meta: { version: RESET_VERSION, total: fromListIds.length, fonte: 'list-ids' } };
+    }
+  }
 
   // Modo 1 (preferencial): spaces/folders/listas de projetos -> cliente = nome da pasta/lista
   var projetos = _clickupByProjectFolders(team, hdrs);
@@ -140,6 +159,35 @@ function _clickupRecent() {
     return { cliente:x.cliente, listId:x.listId, folderUrl:x.folderUrl, lastUpdate:x.lastUpdate, diasSemUpdate:x.lastUpdate>0?Math.floor((Date.now()-x.lastUpdate)/86400000):999, consultor:x.consultor, fases:x.fases, progresso:total?Math.round(x.done/total*100):0, totalFases:total, fasesDone:x.done, fasesPend:total-x.done, marcosTotal:x.marcosTotal, marcosDone:x.marcosDone, marcosPend:Math.max(0, x.marcosTotal - x.marcosDone), aliases:x.aliases };
   });
   return { clickup: fallback, meta: { version: RESET_VERSION, total: fallback.length, tasksLidas: tasks.length, fonte: 'team-task-fallback' } };
+}
+
+function _parseListIds(e){
+  var raw = (e && e.parameter && e.parameter.list_ids) ? String(e.parameter.list_ids) : '';
+  if (!raw) return [];
+  var out = [];
+  raw.split(',').forEach(function(x){
+    var id = String(x || '').replace(/[^\d]/g, '').trim();
+    if (id && out.indexOf(id) === -1) out.push(id);
+  });
+  return out;
+}
+function _clickupByListIds(listIds, team, hdrs){
+  var out = [];
+  listIds.forEach(function(listId){
+    try {
+      var lresp = UrlFetchApp.fetch('https://api.clickup.com/api/v2/list/' + listId, { headers: hdrs, muteHttpExceptions: true });
+      var lobj = JSON.parse(lresp.getContentText() || '{}');
+      if (!lobj || !lobj.id) return;
+      var clienteNome = (lobj.folder && lobj.folder.name) || lobj.name || ('Lista ' + listId);
+      var metric = _summarizeList(listId, hdrs, clienteNome, lobj.url || '');
+      if (!metric.totalFases) return;
+      metric.listId = listId;
+      metric.folderUrl = lobj.url || metric.folderUrl || ('https://app.clickup.com/' + team + '/v/li/' + listId);
+      metric.aliases = _unique([clienteNome, lobj.name || '', (lobj.folder && lobj.folder.name) || '', (lobj.space && lobj.space.name) || '']);
+      out.push(metric);
+    } catch (err) {}
+  });
+  return out;
 }
 
 function _clickupByProjectFolders(team, hdrs) {

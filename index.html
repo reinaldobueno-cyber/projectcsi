@@ -2130,6 +2130,16 @@ function _finalizarLoad(projetos, isRefresh, motivo) {
   var temDados = projetos && projetos.length > 0;
   if (temDados) {
     DATA.projetos = projetos;
+    try {
+      var ex = DATA.projetos[0] || {};
+      console.info('[PMO] Sample planilha', {
+        cliente: ex.cliente || '',
+        consultor: ex.consultor || '',
+        clickup: ex.clickup || '',
+        status: ex.status || '',
+        mes: ex.mes || ''
+      });
+    } catch (eSample) {}
     try { localStorage.setItem('multsoft_pmo_data', JSON.stringify(DATA)); localStorage.setItem('multsoft_pmo_ts', String(Date.now())); } catch(e) {}
     var now = new Date();
     var hora = now.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
@@ -2556,6 +2566,12 @@ function _ckBuscar() {
   }
   _ckCache = {};
   _ckByListId = {};
+  var idsPlanilha = [];
+  (DATA.projetos || []).forEach(function(p){
+    var id = _ckListIdFrom(p && p.clickup);
+    if (id && idsPlanilha.indexOf(id) === -1) idsPlanilha.push(id);
+  });
+  var idsQs = idsPlanilha.length ? ('&list_ids=' + encodeURIComponent(idsPlanilha.join(','))) : '';
 
   function tentarCK(attempt){
     var done=false, cbName='_ckCb'+Date.now()+'_'+attempt;
@@ -2580,6 +2596,7 @@ function _ckBuscar() {
       }
       if (resp && resp.meta) _ckWorkspaceId = String(resp.meta.workspace || resp.meta.team || _ckWorkspaceId || '');
       var ckList=(resp&&resp.clickup)||[];
+      console.info('[PMO] ClickUp retorno', { total: ckList.length, fonte: (resp && resp.meta && resp.meta.fonte) || '', idsPlanilha: idsPlanilha.length });
       if(!ckList.length){
         if (attempt < CLICKUP_MAX_RETRIES) { console.warn('[PMO] Resposta vazia ClickUp tentativa', attempt + 1, 'de', CLICKUP_MAX_RETRIES + 1); tentarCK(attempt+1); return; }
         showToast('Nenhum dado retornado','err'); _renderCk(filteredProj()); return;
@@ -2618,7 +2635,7 @@ function _ckBuscar() {
 
     var s=document.createElement('script');
     s.id='_ckJsonp_'+cbName;
-    s.src=APPS_SCRIPT_URL+'?action=clickup&callback='+cbName+'&_ts='+Date.now()+(APPS_FORCE_NOCACHE?'&nocache=1&debug=1':'');
+    s.src=APPS_SCRIPT_URL+'?action=clickup&callback='+cbName+'&_ts='+Date.now()+idsQs+(APPS_FORCE_NOCACHE?'&nocache=1&debug=1':'');
     s.onerror=function(){
       if(done) return; done=true; clearTimeout(timer); _limparCkJsonp(cbName);
       if (attempt < CLICKUP_MAX_RETRIES) { console.warn('[PMO] Erro de rede ClickUp tentativa', attempt + 1, 'de', CLICKUP_MAX_RETRIES + 1); tentarCK(attempt+1); return; }
