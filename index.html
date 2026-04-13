@@ -36,6 +36,7 @@
   </header>
 
   <div class="wrap">
+    <div id="errorBox" class="card danger" style="display:none"></div>
     <div class="kpis">
       <div class="kpi"><div class="muted">Projetos</div><div id="kTotal" class="n">0</div></div>
       <div class="kpi"><div class="muted">Com consultor</div><div id="kComCons" class="n">0</div></div>
@@ -65,8 +66,16 @@
   var APPS_SCRIPT_URL_DEFAULT = 'https://script.google.com/macros/s/AKfycby3OimL5C68K40B7lt6iMHjIrDUhhXBmeM3FLZMOzHf2evn-q-_2kIDzprls44N_vjJ/exec';
   var APPS_SCRIPT_URL = (function(){
     try {
-      var p = new URLSearchParams(window.location.search).get('apps_script_url');
-      return p || APPS_SCRIPT_URL_DEFAULT;
+      var qs = window.location.search || '';
+      var p = new URLSearchParams(qs).get('apps_script_url');
+      if (p) return p;
+      // fallback para URL passada de forma incorreta após '?'
+      var raw = decodeURIComponent(qs.replace(/^\?/, ''));
+      if (/script\.google\.com\/macros\/s\//i.test(raw)) {
+        if (!/^https?:\/\//i.test(raw)) raw = 'https://' + raw.replace(/^\/+/, '');
+        return raw;
+      }
+      return APPS_SCRIPT_URL_DEFAULT;
     } catch(e){ return APPS_SCRIPT_URL_DEFAULT; }
   })();
 
@@ -84,17 +93,37 @@
   function _jsonp(url, cb){
     var cbName = '__cb_' + Date.now() + '_' + Math.floor(Math.random()*10000);
     var done = false;
+    console.log('URL usada:', url);
     var timer = setTimeout(function(){ if(done) return; done=true; cleanup(); cb(new Error('timeout')); }, 45000);
     function cleanup(){
       clearTimeout(timer);
       try{ delete window[cbName]; }catch(e){}
       if (s && s.parentNode) s.parentNode.removeChild(s);
     }
-    window[cbName] = function(resp){ if(done) return; done=true; cleanup(); cb(null, resp); };
+    window[cbName] = function(resp){
+      if(done) return;
+      done=true;
+      cleanup();
+      console.log('Resposta recebida:', resp);
+      cb(null, resp);
+    };
     var s = document.createElement('script');
     s.src = url + (url.indexOf('?')>=0?'&':'?') + 'callback=' + cbName + '&_ts=' + Date.now();
-    s.onerror = function(){ if(done) return; done=true; cleanup(); cb(new Error('network')); };
+    s.onerror = function(){
+      if(done) return;
+      done=true;
+      cleanup();
+      cb(new Error('network'));
+    };
     document.head.appendChild(s);
+  }
+
+  function setError(msg){
+    var box = document.getElementById('errorBox');
+    if (!box) return;
+    if (!msg) { box.style.display = 'none'; box.textContent = ''; return; }
+    box.style.display = 'block';
+    box.textContent = msg;
   }
 
   function _normalizeProjeto(p){
@@ -113,12 +142,21 @@
 
   // loadAll()
   function loadAll(isRefresh){
+    setError('');
     _jsonp(APPS_SCRIPT_URL + '?mes=ALL', function(err, resp){
-      if (err || !resp || !resp.projetos) {
+      if (err) {
         console.error('[PMO] erro ao carregar planilha', err, resp);
-        DATA.projetos = [];
-        renderProjetos();
-        _renderCk();
+        setError('Erro ao carregar dados da planilha (falha de rede/timeout).');
+        return;
+      }
+      if (!resp || !resp.projetos || !Array.isArray(resp.projetos)) {
+        console.error('[PMO] resposta inválida da planilha', resp);
+        setError('Erro ao carregar dados da planilha (resposta inválida).');
+        return;
+      }
+      if (!resp.projetos.length) {
+        console.error('[PMO] planilha retornou vazia', resp);
+        setError('Erro ao carregar dados da planilha (0 projetos retornados).');
         return;
       }
       DATA.projetos = (resp.projetos || []).map(_normalizeProjeto).filter(function(p){ return p.cliente; });
