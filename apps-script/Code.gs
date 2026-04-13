@@ -222,32 +222,50 @@ function _buscarClickUp(opts) {
   var projetos = [];
   var started = Date.now();
 
-  // Auto-descoberta de spaces se CK_SPACES_JSON não estiver preenchido corretamente
-  if (!spaces.length) {
+  function _discoverSpaces() {
     try {
       var sresp = UrlFetchApp.fetch(
         'https://api.clickup.com/api/v2/team/' + workspaceId + '/space?archived=false',
         { headers: hdrs, muteHttpExceptions: true }
       );
-      spaces = (JSON.parse(sresp.getContentText() || '{}').spaces || []).map(function(s){ return s.id; });
-    } catch (e0) {}
+      return (JSON.parse(sresp.getContentText() || '{}').spaces || []).map(function(s){ return String(s.id); });
+    } catch (e0) {
+      return [];
+    }
   }
+  // Auto-descoberta de spaces se CK_SPACES_JSON vier vazio
+  if (!spaces.length) spaces = _discoverSpaces();
   if (!spaces.length) return { clickup: [], meta: { version: APP_VERSION, total: 0, generatedAt: new Date().toISOString(), erro: 'Sem spaces válidos (CK_SPACES_JSON)' } };
+  spaces = spaces.map(function(s){ return String(s); });
+
+  function _loadListsForSpaces(spaceIds) {
+    var lists = [];
+    spaceIds.forEach(function(spaceId) {
+      if ((Date.now() - started) > CLICKUP_MAX_MS) return;
+      try {
+        var lresp = UrlFetchApp.fetch(
+          'https://api.clickup.com/api/v2/space/' + spaceId + '/list?archived=false',
+          { headers: hdrs, muteHttpExceptions: true }
+        );
+        var listas = JSON.parse(lresp.getContentText() || '{}').lists || [];
+        listas.forEach(function(li){ li._spaceId = spaceId; });
+        lists = lists.concat(listas);
+      } catch (e1) {}
+    });
+    return lists;
+  }
 
   // 1) Busca listas de todos os spaces (inclui listas sem pasta)
-  var allLists = [];
-  spaces.forEach(function(spaceId) {
-    if ((Date.now() - started) > CLICKUP_MAX_MS) return;
-    try {
-      var lresp = UrlFetchApp.fetch(
-        'https://api.clickup.com/api/v2/space/' + spaceId + '/list?archived=false',
-        { headers: hdrs, muteHttpExceptions: true }
-      );
-      var listas = JSON.parse(lresp.getContentText() || '{}').lists || [];
-      listas.forEach(function(li){ li._spaceId = spaceId; });
-      allLists = allLists.concat(listas);
-    } catch (e1) {}
-  });
+  var allLists = _loadListsForSpaces(spaces);
+  // Se CK_SPACES_JSON vier preenchido com IDs inválidos (não-space), faz fallback por auto-descoberta
+  var fallbackSpaces = [];
+  if (!allLists.length) {
+    fallbackSpaces = _discoverSpaces();
+    if (fallbackSpaces.length) {
+      spaces = fallbackSpaces;
+      allLists = _loadListsForSpaces(spaces);
+    }
+  }
 
   if (allLists.length > CLICKUP_MAX_FOLDERS * 2) allLists = allLists.slice(0, CLICKUP_MAX_FOLDERS * 2);
 
@@ -347,7 +365,8 @@ function _buscarClickUp(opts) {
     generatedAt: new Date().toISOString(),
     spacesLidos: spaces.length,
     listasLidas: allLists.length,
-    listasCandidatas: cronos.length
+    listasCandidatas: cronos.length,
+    fallbackAutoSpaces: fallbackSpaces.length
   } };
   cache.put('clickup_payload_v1', JSON.stringify(out), CLICKUP_CACHE_TTL_SECONDS);
   return out;
