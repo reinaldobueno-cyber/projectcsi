@@ -254,6 +254,29 @@
         + '</div>';
     }).join('');
   }
+  _ckCache = {};
+  _ckByListId = {};
+  var idsPlanilha = [];
+  (DATA.projetos || []).forEach(function(p){
+    var id = _ckListIdFrom(p && p.clickup);
+    if (id && idsPlanilha.indexOf(id) === -1) idsPlanilha.push(id);
+  });
+  var idsQs = idsPlanilha.length ? ('&list_ids=' + encodeURIComponent(idsPlanilha.join(','))) : '';
+
+  function tentarCK(attempt){
+    var done=false, cbName='_ckCb'+Date.now()+'_'+attempt;
+    var timer=setTimeout(function(){
+      if(done) return; done=true; _limparCkJsonp(cbName);
+      if (attempt < CLICKUP_MAX_RETRIES) {
+        showToast('ClickUp lento, tentando novamente... ('+(attempt+2)+'/'+(CLICKUP_MAX_RETRIES+1)+')','err');
+        console.warn('[PMO] Timeout ClickUp tentativa', attempt + 1, 'de', CLICKUP_MAX_RETRIES + 1);
+        tentarCK(attempt+1);
+      } else {
+        console.error('[PMO] Timeout final ClickUp apos', CLICKUP_MAX_RETRIES + 1, 'tentativas');
+        showToast('Timeout \u2014 Apps Script demorou mais de '+Math.round(CLICKUP_TIMEOUT_MS/1000)+'s','err');
+        _renderCk(filteredProj());
+      }
+    },CLICKUP_TIMEOUT_MS);
 
   // util
   function esc(s){ return String(s||'').replace(/[&<>\"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
