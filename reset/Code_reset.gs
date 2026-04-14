@@ -75,6 +75,8 @@ function _sheetsAll() {
     var iStatus  = idx(['STATUS']);
     var iVend    = idx(['VENDEDOR']);
     var iClick   = idx(['PROJETO CLICKUP','CLICKUP']);
+    var iLink    = idx(['LINK PROJETO','LINK DO PROJETO','PROJETO LINK','URL PROJETO','LINK']);
+    if (iLink < 0) iLink = hdrs.length ? (hdrs.length - 1) : -1; // última coluna (W)
     var iIni     = idx(['DATA IN/INICIO IMPLANT','DATA INICIO','DATA INICIO IMPLANT']);
     var iObs     = idx(['OBS','OBSERVA','OBSERVAÇÃO','OBSERVACAO']);
     if (iCliente < 0) return;
@@ -90,6 +92,7 @@ function _sheetsAll() {
         status: iStatus>=0?String(row[iStatus]||'').trim():'',
         vendedor: iVend>=0?String(row[iVend]||'').trim():'',
         clickup: iClick>=0?String(row[iClick]||'').trim():'',
+        projeto_link: iLink>=0?String(row[iLink]||'').trim():'',
         data_inicio: iIni>=0?String(row[iIni]||'').trim():'',
         obs: iObs>=0?String(row[iObs]||'').trim():''
       });

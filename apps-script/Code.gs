@@ -180,6 +180,8 @@ function _buscarSheets(e, opts) {
 
     var idxConsultor = colAny(['CONSULTOR','CONSULTOR(A)','CONSULTOR RESPONSAVEL','CONSULTOR RESPONSÁVEL']);
     if (idxConsultor < 0) idxConsultor = colContains(['CONSULTOR','IMPLANTADOR','RESPONSAVEL']);
+    var idxProjetoLink = colAny(['LINK PROJETO','LINK DO PROJETO','PROJETO LINK','URL PROJETO','LINK']);
+    if (idxProjetoLink < 0) idxProjetoLink = hdrs.length ? (hdrs.length - 1) : -1; // última coluna (W)
     for (var r=hdrRowIndex+1; r<data.length; r++) {
       var row=data[r];
       var cliente=vAny(row,['CLIENTE','CLIENTE / FAZENDA','NOME CLIENTE']);
@@ -187,12 +189,13 @@ function _buscarSheets(e, opts) {
       var dc=numAny(row,['QNT DI','QNTD DI','DIARIAS CONTRATADAS']);
       var dr=numAny(row,['REALIZADAS','DIARIAS REALIZADAS']);
       var consultorVal = idxConsultor >= 0 ? String(row[idxConsultor] || '').trim() : '';
+      var projetoLinkVal = idxProjetoLink >= 0 ? String(row[idxProjetoLink] || '').trim() : '';
       result.push({
         mes:m, cliente:cliente, consultor:consultorVal, pacote:v(row,'PACOTE'),
         adicionais:v(row,'ADICIONAIS'), tipo:v(row,'TIPO'), vendedor:v(row,'VENDEDOR'),
         formato:v(row,'FORMATO'), cidade:v(row,'CIDADE'), data_venda:dtAny(row,['DATA DA VENDA','DATA VENDA']),
         kickoff:vAny(row,['KICK OFF REALIZADO','KICKOFF']), data_kick:dtAny(row,['DATA KICK OFF','DATA KICKOFF']),
-        clickup:vAny(row,['PROJETO CLICKUP','CLICKUP']), data_inicio:dtAny(row,['DATA IN/INICIO IMPLANT','DATA INICIO IMPLANT','DATA INICIO']),
+        clickup:vAny(row,['PROJETO CLICKUP','CLICKUP']), projeto_link:projetoLinkVal, data_inicio:dtAny(row,['DATA IN/INICIO IMPLANT','DATA INICIO IMPLANT','DATA INICIO']),
         data_estimada:dtAny(row,['DATA ESTIMADA IMPLANT','DATA ESTIMADA']), diarias_cont:dc, diarias_real:dr,
         diarias_rest:(dc!==null&&dr!==null)?dc-dr:null, acompanhamento:v(row,'ACOMPANHAMENTO'),
         status:v(row,'STATUS'), obs:vAny(row,['OBSERVA','OBS','OBSERVACAO','OBSERVAÇÃO']), data_enc:dtAny(row,['DATA ENC','DATA ENCERRAMENTO'])
@@ -320,6 +323,8 @@ function _buscarClickUp(opts) {
     var consultorCK = null;
     var fases = [];
     var fasesDone = 0;
+    var marcosTotal = 0;
+    var marcosDone = 0;
 
     tasks.forEach(function(t) {
       if (t.parent) return;
@@ -331,6 +336,12 @@ function _buscarClickUp(opts) {
       var st = String((t.status && (t.status.status || t.status)) || '').toLowerCase();
       var done = st==='concluido'||st==='closed'||st==='done'||st==='complete';
       if (done) fasesDone++;
+      var nomeT = String(t.name || '').toLowerCase();
+      var isMarco = nomeT.indexOf('marco') >= 0 || nomeT.indexOf('milestone') >= 0;
+      if (isMarco) {
+        marcosTotal++;
+        if (done) marcosDone++;
+      }
       fases.push({
         nome: t.name || '',
         status: (t.status && (t.status.status || t.status)) || '',
@@ -355,7 +366,10 @@ function _buscarClickUp(opts) {
       progresso: totalFases > 0 ? Math.round(fasesDone / totalFases * 100) : 0,
       totalFases: totalFases,
       fasesDone: fasesDone,
-      fasesPend: totalFases - fasesDone
+      fasesPend: totalFases - fasesDone,
+      marcosTotal: marcosTotal,
+      marcosDone: marcosDone,
+      marcosPend: marcosTotal - marcosDone
     });
   });
 

@@ -12,18 +12,13 @@
     .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px}
     .kpi{background:#fff;border:1px solid #d9e5de;border-radius:10px;padding:12px}
     .kpi .n{font-size:24px;font-weight:800}
-    .tabs{display:flex;gap:8px;margin:8px 0 12px}
-    .tab{padding:8px 12px;border:1px solid #bdd2c8;border-radius:8px;background:#fff;cursor:pointer;font-weight:600}
-    .tab.on{background:#124d34;color:#fff;border-color:#124d34}
-    .panel{display:none}
-    .panel.on{display:block}
     .card{background:#fff;border:1px solid #d9e5de;border-radius:10px;padding:10px 12px;margin-bottom:8px}
     .muted{color:#6b7d74;font-size:12px}
     .danger{color:#b42318;font-weight:700}
-    .ok{color:#1a7f37;font-weight:700}
-    .row{display:flex;justify-content:space-between;gap:10px;align-items:center}
     .small{font-size:12px}
-    a.link{color:#124d34;text-decoration:none;font-weight:700}
+    .row{display:flex;justify-content:space-between;align-items:center;gap:10px}
+    .open-btn{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:16px;border:1px solid #1f7a53;background:#f3fbf7;color:#1f7a53;font-size:11px;font-weight:700;text-decoration:none}
+    #errorBox{display:none}
   </style>
 </head>
 <body>
@@ -36,40 +31,36 @@
   </header>
 
   <div class="wrap">
-    <div id="errorBox" class="card danger" style="display:none"></div>
+    <div id="errorBox" class="card danger"></div>
+
     <div class="kpis">
       <div class="kpi"><div class="muted">Projetos</div><div id="kTotal" class="n">0</div></div>
       <div class="kpi"><div class="muted">Com consultor</div><div id="kComCons" class="n">0</div></div>
       <div class="kpi"><div class="muted">Sem consultor</div><div id="kSemCons" class="n">0</div></div>
-      <div class="kpi"><div class="muted">Com dados CK</div><div id="kComCk" class="n">0</div></div>
+      <div class="kpi"><div class="muted">Com link projeto</div><div id="kComLink" class="n">0</div></div>
     </div>
 
-    <div class="tabs">
-      <button id="tProjetos" class="tab on" onclick="showTab('projetos')">Projetos</button>
-      <button id="tClickup" class="tab" onclick="showTab('clickup')">ClickUp</button>
-    </div>
-
-    <section id="pProjetos" class="panel on">
+    <section id="pProjetos">
       <div id="projetosList"></div>
     </section>
 
-    <section id="pClickup" class="panel">
-      <div style="margin-bottom:10px">
-        <button class="btn" onclick="_ckBuscar()">Buscar dados do ClickUp</button>
+    <section id="pMetricas" style="margin-top:16px">
+      <div class="row" style="margin-bottom:8px">
+        <h3 style="margin:0">Métricas de Projeto (ClickUp)</h3>
+        <button class="btn" onclick="_ckBuscar()">Atualizar métricas</button>
       </div>
-      <div id="ckList"></div>
+      <div id="riscosList"></div>
+      <div id="metricasList"></div>
     </section>
   </div>
 
   <script>
-  // configuração global
   var APPS_SCRIPT_URL_DEFAULT = 'https://script.google.com/macros/s/AKfycby3OimL5C68K40B7lt6iMHjIrDUhhXBmeM3FLZMOzHf2evn-q-_2kIDzprls44N_vjJ/exec';
   var APPS_SCRIPT_URL = (function(){
     try {
       var qs = window.location.search || '';
       var p = new URLSearchParams(qs).get('apps_script_url');
       if (p) return p;
-      // fallback para URL passada de forma incorreta após '?'
       var raw = decodeURIComponent(qs.replace(/^\?/, ''));
       if (/script\.google\.com\/macros\/s\//i.test(raw)) {
         if (!/^https?:\/\//i.test(raw)) raw = 'https://' + raw.replace(/^\/+/, '');
@@ -79,15 +70,15 @@
     } catch(e){ return APPS_SCRIPT_URL_DEFAULT; }
   })();
 
-  // DATA
   var DATA = { projetos: [] };
   var _ckCache = {};
 
-  function showTab(tab){
-    document.getElementById('pProjetos').classList.toggle('on', tab==='projetos');
-    document.getElementById('pClickup').classList.toggle('on', tab==='clickup');
-    document.getElementById('tProjetos').classList.toggle('on', tab==='projetos');
-    document.getElementById('tClickup').classList.toggle('on', tab==='clickup');
+  function setError(msg){
+    var box = document.getElementById('errorBox');
+    if (!box) return;
+    if (!msg) { box.style.display = 'none'; box.textContent = ''; return; }
+    box.style.display = 'block';
+    box.textContent = msg;
   }
 
   function _jsonp(url, cb){
@@ -109,92 +100,71 @@
     };
     var s = document.createElement('script');
     s.src = url + (url.indexOf('?')>=0?'&':'?') + 'callback=' + cbName + '&_ts=' + Date.now();
-    s.onerror = function(){
-      if(done) return;
-      done=true;
-      cleanup();
-      cb(new Error('network'));
-    };
+    s.onerror = function(){ if(done) return; done=true; cleanup(); cb(new Error('network')); };
     document.head.appendChild(s);
-  }
-
-  function setError(msg){
-    var box = document.getElementById('errorBox');
-    if (!box) return;
-    if (!msg) { box.style.display = 'none'; box.textContent = ''; return; }
-    box.style.display = 'block';
-    box.textContent = msg;
   }
 
   function _normalizeProjeto(p){
     var x = p || {};
     var consultor = x.consultor || x.consultor_nome || x.consultorNome || x.implantador || x.responsavel || x.responsável || '';
-    var clickup = x.clickup || x.projeto_clickup || x.projetoClickup || x.clickup_url || x.clickupUrl || '';
     var status = x.status || x.situacao || x.situação || '';
+    var projetoLink = x.projeto_link || x.link_projeto || x.linkProjeto || x.url_projeto || x.urlProjeto || '';
     return Object.assign({}, x, {
       cliente: String(x.cliente || x.nome || x.projeto || '').trim(),
       consultor: String(consultor || '').trim(),
-      clickup: String(clickup || '').trim(),
       status: String(status || '').trim(),
+      projeto_link: String(projetoLink || '').trim(),
       mes: String(x.mes || '').trim()
     });
   }
 
-  // loadAll()
   function loadAll(isRefresh){
     setError('');
     _jsonp(APPS_SCRIPT_URL + '?mes=ALL', function(err, resp){
-      if (err) {
-        console.error('[PMO] erro ao carregar planilha', err, resp);
-        setError('Erro ao carregar dados da planilha (falha de rede/timeout).');
-        return;
-      }
-      if (!resp || !resp.projetos || !Array.isArray(resp.projetos)) {
-        console.error('[PMO] resposta inválida da planilha', resp);
-        setError('Erro ao carregar dados da planilha (resposta inválida).');
-        return;
-      }
-      if (!resp.projetos.length) {
-        console.error('[PMO] planilha retornou vazia', resp);
-        setError('Erro ao carregar dados da planilha (0 projetos retornados).');
-        return;
-      }
-      DATA.projetos = (resp.projetos || []).map(_normalizeProjeto).filter(function(p){ return p.cliente; });
-      var ex = DATA.projetos[0] || {};
-      console.info('[PMO] DATA.projetos[0]', ex);
-      console.info('[PMO] consultor sample', ex.consultor || '(vazio)');
+      if (err) { setError('Erro ao carregar dados da planilha (falha de rede/timeout).'); return; }
+      if (!resp || !Array.isArray(resp.projetos)) { setError('Erro ao carregar dados da planilha (resposta inválida).'); return; }
+      if (!resp.projetos.length) { setError('Erro ao carregar dados da planilha (0 projetos retornados).'); return; }
+
+      DATA.projetos = resp.projetos.map(_normalizeProjeto).filter(function(p){ return p.cliente; });
+      console.log('DATA.projetos[0]:', DATA.projetos[0] || null);
+      console.log('Consultor sample:', (DATA.projetos[0] && DATA.projetos[0].consultor) || '(vazio)');
+
       document.getElementById('navDate').textContent = 'Planilha: ' + new Date().toLocaleString('pt-BR');
       renderProjetos();
-      _renderCk();
-      if (isRefresh) console.info('[PMO] atualizado', DATA.projetos.length);
+      _ckBuscar();
+      if (isRefresh) console.log('Atualizado:', DATA.projetos.length);
     });
   }
 
-  // renderização de projetos
   function renderProjetos(){
     var list = document.getElementById('projetosList');
     var total = DATA.projetos.length;
     var comCons = DATA.projetos.filter(function(p){ return p.consultor; }).length;
     var semCons = total - comCons;
+    var comLink = DATA.projetos.filter(function(p){ return p.projeto_link; }).length;
+
     document.getElementById('kTotal').textContent = String(total);
     document.getElementById('kComCons').textContent = String(comCons);
     document.getElementById('kSemCons').textContent = String(semCons);
+    document.getElementById('kComLink').textContent = String(comLink);
 
-    if (!total){
+    if (!total) {
       list.innerHTML = '<div class="card"><div class="danger">Projetos 0</div><div class="muted">Sem dados da planilha.</div></div>';
       return;
     }
 
     list.innerHTML = DATA.projetos.map(function(p){
+      var btn = p.projeto_link
+        ? '<a class="open-btn" target="_blank" rel="noopener" href="'+escAttr(p.projeto_link)+'">Abrir Projeto</a>'
+        : '';
       return '<div class="card">'
-        + '<div class="row"><div><b>'+esc(p.cliente)+'</b></div><div class="small">'+esc(p.mes||'-')+'</div></div>'
+        + '<div class="row"><div><b>'+esc(p.cliente)+'</b></div>'+btn+'</div>'
         + '<div class="muted">Consultor: <b>'+(p.consultor?esc(p.consultor):'<span class="danger">SEM CONSULTOR</span>')+'</b></div>'
-        + '<div class="muted">Status: '+esc(p.status||'-')+' • Vendedor: '+esc(p.vendedor||'-')+'</div>'
+        + '<div class="muted">Status: '+esc(p.status||'-')+' • Vendedor: '+esc(p.vendedor||'-')+' • Mês: '+esc(p.mes||'-')+'</div>'
         + '</div>';
     }).join('');
   }
 
-  // integração ClickUp
   function _ckListIdFrom(v){
     var s = String(v || '');
     var m = s.match(/\/v\/li\/(\d+)/i) || s.match(/(?:^|[^\d])(\d{8,})(?:[^\d]|$)/);
@@ -204,85 +174,76 @@
   function _ckBuscar(){
     var ids = [];
     DATA.projetos.forEach(function(p){
-      var id = _ckListIdFrom(p.clickup);
+      var id = _ckListIdFrom(p.projeto_link || p.clickup);
       if (id && ids.indexOf(id) === -1) ids.push(id);
     });
-    var qs = ids.length ? ('&list_ids=' + encodeURIComponent(ids.join(','))) : '';
-    _jsonp(APPS_SCRIPT_URL + '?action=clickup' + qs, function(err, resp){
-      if (err || !resp || !resp.clickup){
-        console.error('[PMO] erro clickup', err, resp);
+    if (!ids.length) { _ckCache = {}; renderMetricas(); return; }
+    _jsonp(APPS_SCRIPT_URL + '?action=clickup&list_ids=' + encodeURIComponent(ids.join(',')), function(err, resp){
+      if (err || !resp || !Array.isArray(resp.clickup)) {
+        console.error('Erro ClickUp:', err, resp);
         _ckCache = {};
-        _renderCk();
+        renderMetricas();
         return;
       }
       _ckCache = {};
-      (resp.clickup || []).forEach(function(it){
-        var key = _ckListIdFrom(it.listId || it.folderUrl || '');
-        if (key) _ckCache[key] = it;
+      resp.clickup.forEach(function(it){
+        var id = _ckListIdFrom(it.listId || it.folderUrl || '');
+        if (id) _ckCache[id] = it;
       });
-      console.info('[PMO] retorno clickup', resp);
-      console.info('[PMO] _ckCache size', Object.keys(_ckCache).length);
-      _renderCk(resp.clickup || []);
+      console.log('Retorno ClickUp:', resp);
+      renderMetricas();
     });
   }
 
-  // renderização ClickUp
-  function _renderCk(ckList){
-    var wrap = document.getElementById('ckList');
-    var list = ckList || [];
-    if (!list.length) {
-      // tenta casar via cache com projetos
-      var matched = 0;
-      DATA.projetos.forEach(function(p){ if (_ckCache[_ckListIdFrom(p.clickup)]) matched++; });
-      document.getElementById('kComCk').textContent = String(matched);
-      wrap.innerHTML = '<div class="card"><div class="muted">Sem dados CK carregados.</div></div>';
-      return;
-    }
+  function _riskOf(m){
+    var score = 0, motivos = [];
+    if (!m.hasData) { score += 70; motivos.push('Sem dados ClickUp'); }
+    if (m.hasData && m.diasSemUpdate >= 14) { score += 50; motivos.push('Projeto parado ('+m.diasSemUpdate+'d)'); }
+    if (m.hasData && !m.assignee) { score += 35; motivos.push('Sem dono'); }
+    if (m.hasData && m.fasesPend > 0 && m.diasSemUpdate >= 7) { score += 25; motivos.push('Atraso/pêndencias'); }
+    return { score: score, motivos: motivos };
+  }
 
-    var matchedCount = 0;
-    DATA.projetos.forEach(function(p){ if (_ckCache[_ckListIdFrom(p.clickup)]) matchedCount++; });
-    document.getElementById('kComCk').textContent = String(matchedCount);
+  function renderMetricas(){
+    var rows = DATA.projetos.map(function(p){
+      var id = _ckListIdFrom(p.projeto_link || p.clickup);
+      var ck = id ? _ckCache[id] : null;
+      var hasData = !!ck;
+      var row = {
+        cliente: p.cliente,
+        assignee: hasData ? (ck.consultor || '-') : '-',
+        progresso: hasData ? (ck.progresso || 0) : null,
+        fasesDone: hasData ? (ck.fasesDone || 0) : 0,
+        fasesPend: hasData ? (ck.fasesPend || 0) : 0,
+        marcosDone: hasData ? (ck.marcosDone || 0) : 0,
+        marcosPend: hasData ? (ck.marcosPend || 0) : 0,
+        diasSemUpdate: hasData ? (ck.diasSemUpdate || 0) : null,
+        hasData: hasData
+      };
+      row.risk = _riskOf(row);
+      return row;
+    });
 
-    wrap.innerHTML = list.map(function(it){
-      var url = it.folderUrl || it.url || '';
-      return '<div class="card">'
-        + '<div class="row"><div><b>'+esc(it.cliente || it.nome || 'Projeto CK')+'</b></div>'
-        + '<div class="small">'+esc(String(it.progresso||0))+'%</div></div>'
-        + '<div class="muted">Consultor CK: '+esc(it.consultor || '-')+'</div>'
-        + '<div class="muted">Fases: '+esc(String(it.fasesDone||0))+'/'+esc(String(it.totalFases||0))+'</div>'
-        + (url?'<div><a class="link" target="_blank" href="'+escAttr(url)+'">Abrir no ClickUp</a></div>':'')
+    var top = rows.filter(function(r){ return r.risk.score > 0; }).sort(function(a,b){ return b.risk.score - a.risk.score; }).slice(0,8);
+    document.getElementById('riscosList').innerHTML = top.length
+      ? '<div class=\"card\"><b>Top riscos</b><div class=\"muted\" style=\"margin-top:6px\">'
+        + top.map(function(r){ return '• ' + esc(r.cliente) + ' — ' + esc(r.risk.motivos.join(', ')); }).join('<br>')
+        + '</div></div>'
+      : '<div class=\"card\"><b>Top riscos</b><div class=\"muted\" style=\"margin-top:6px\">Sem riscos críticos no momento.</div></div>';
+
+    document.getElementById('metricasList').innerHTML = rows.map(function(r){
+      return '<div class=\"card\">'
+        + '<div class=\"row\"><b>'+esc(r.cliente)+'</b><span class=\"small\">'+(r.hasData?('Progresso: '+esc(String(r.progresso))+'%'):'Sem dados CK')+'</span></div>'
+        + '<div class=\"muted\">Tarefas: '+esc(String(r.fasesDone))+' concluídas / '+esc(String(r.fasesPend))+' pendentes</div>'
+        + '<div class=\"muted\">Marcos: '+esc(String(r.marcosDone))+' concluídos / '+esc(String(r.marcosPend))+' pendentes</div>'
+        + '<div class=\"muted\">Dias sem atualização: '+(r.diasSemUpdate===null?'-':esc(String(r.diasSemUpdate)))+' • Assignee recente: '+esc(r.assignee || '-')+'</div>'
         + '</div>';
     }).join('');
   }
-  _ckCache = {};
-  _ckByListId = {};
-  var idsPlanilha = [];
-  (DATA.projetos || []).forEach(function(p){
-    var id = _ckListIdFrom(p && p.clickup);
-    if (id && idsPlanilha.indexOf(id) === -1) idsPlanilha.push(id);
-  });
-  var idsQs = idsPlanilha.length ? ('&list_ids=' + encodeURIComponent(idsPlanilha.join(','))) : '';
 
-  function tentarCK(attempt){
-    var done=false, cbName='_ckCb'+Date.now()+'_'+attempt;
-    var timer=setTimeout(function(){
-      if(done) return; done=true; _limparCkJsonp(cbName);
-      if (attempt < CLICKUP_MAX_RETRIES) {
-        showToast('ClickUp lento, tentando novamente... ('+(attempt+2)+'/'+(CLICKUP_MAX_RETRIES+1)+')','err');
-        console.warn('[PMO] Timeout ClickUp tentativa', attempt + 1, 'de', CLICKUP_MAX_RETRIES + 1);
-        tentarCK(attempt+1);
-      } else {
-        console.error('[PMO] Timeout final ClickUp apos', CLICKUP_MAX_RETRIES + 1, 'tentativas');
-        showToast('Timeout \u2014 Apps Script demorou mais de '+Math.round(CLICKUP_TIMEOUT_MS/1000)+'s','err');
-        _renderCk(filteredProj());
-      }
-    },CLICKUP_TIMEOUT_MS);
-
-  // util
   function esc(s){ return String(s||'').replace(/[&<>\"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
   function escAttr(s){ return esc(s).replace(/`/g,''); }
 
-  // inicialização
   loadAll(false);
   </script>
 </body>
